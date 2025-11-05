@@ -171,7 +171,20 @@ class ArionBankiScraper(BankScraper):
             # If it's JSON data from API
             return text.get('effective_date')
 
-        # Parse from text
+        # Try numeric date format first (DD.MM.YYYY)
+        numeric_pattern = r'(\d{1,2})\.(\d{1,2})\.(\d{4})'
+        match = re.search(numeric_pattern, text)
+        if match:
+            day = int(match.group(1))
+            month = int(match.group(2))
+            year = int(match.group(3))
+            try:
+                date = datetime(year, month, day)
+                return date.strftime('%Y-%m-%d')
+            except ValueError:
+                pass
+
+        # Parse from text with month names
         months_icelandic = {
             'janúar': 1, 'febrúar': 2, 'mars': 3, 'apríl': 4,
             'maí': 5, 'júní': 6, 'júlí': 7, 'ágúst': 8,
@@ -225,17 +238,17 @@ class ArionBankiScraper(BankScraper):
             "penalty_interest": None
         }
 
-        # Parse deposit accounts
-        rates["deposits"]["veltureikningar"]["almennir"] = self.parse_rate(text, r"Veltureikningur.*?(\d+[,\.]\d+)%")
+        # Parse deposit accounts - match plural form and look for the actual rate line
+        rates["deposits"]["veltureikningar"]["almennir"] = self.parse_rate(text, r"Veltureikningar\s+(\d+[,\.]\d+)%")
 
         # Fríðindareikningur (tiered)
         fridindar = {}
         tier_patterns = [
-            (r"1\. þrep.*?0-1 millj.*?(\d+[,\.]\d+)%", "tier_0_1m"),
-            (r"2\. þrep.*?1-5 millj.*?(\d+[,\.]\d+)%", "tier_1m_5m"),
-            (r"3\. þrep.*?5-20 millj.*?(\d+[,\.]\d+)%", "tier_5m_20m"),
-            (r"4\. þrep.*?20-100 millj.*?(\d+[,\.]\d+)%", "tier_20m_100m"),
-            (r"5\. þrep.*?yfir 100 millj.*?(\d+[,\.]\d+)%", "tier_100m_plus"),
+            (r"1\.\s*þrep\s*\(0-1 millj\.\).*?(\d+[,\.]\d+)%", "tier_0_1m"),
+            (r"2\.\s*þrep\s*\(1-5 millj\.\).*?(\d+[,\.]\d+)%", "tier_1m_5m"),
+            (r"3\.\s*þrep\s*\(5-20 millj\.\).*?(\d+[,\.]\d+)%", "tier_5m_20m"),
+            (r"4\.\s*þrep\s*\(20-100 millj\.\).*?(\d+[,\.]\d+)%", "tier_20m_100m"),
+            (r"5\.\s*þrep\s*\(yfir 100 millj\.\).*?(\d+[,\.]\d+)%", "tier_100m_plus"),
         ]
 
         for pattern, key in tier_patterns:
@@ -249,10 +262,10 @@ class ArionBankiScraper(BankScraper):
         # Vöxtur accounts
         voxtur_30 = {}
         voxtur_patterns = [
-            (r"Vöxtur 30.*?0-5 millj.*?(\d+[,\.]\d+)%", "tier_0_5m"),
-            (r"Vöxtur 30.*?5-20 millj.*?(\d+[,\.]\d+)%", "tier_5m_20m"),
-            (r"Vöxtur 30.*?20-50 millj.*?(\d+[,\.]\d+)%", "tier_20m_50m"),
-            (r"Vöxtur 30.*?>50 millj.*?(\d+[,\.]\d+)%", "tier_50m_plus"),
+            (r"Vöxtur 30.*?1\.\s*þrep\s*\(0-5 millj\.\).*?(\d+[,\.]\d+)%", "tier_0_5m"),
+            (r"Vöxtur 30.*?2\.\s*þrep\s*\(5-20 millj\.\).*?(\d+[,\.]\d+)%", "tier_5m_20m"),
+            (r"Vöxtur 30.*?3\.\s*þrep\s*\(20-50 millj\.\).*?(\d+[,\.]\d+)%", "tier_20m_50m"),
+            (r"Vöxtur 30.*?4\.\s*þrep\s*\(>50 millj\.\).*?(\d+[,\.]\d+)%", "tier_50m_plus"),
         ]
 
         for pattern, key in voxtur_patterns:
@@ -264,35 +277,41 @@ class ArionBankiScraper(BankScraper):
             rates["deposits"]["sparireikningar"]["voxtur_30"] = voxtur_30
 
         # Íbúðasparnaður
-        rates["deposits"]["sparireikningar"]["ibudasparnadur"] = self.parse_rate(text, r"Íbúðasparnaður.*?(\d+[,\.]\d+)%")
+        rates["deposits"]["sparireikningar"]["ibudasparnadur"] = self.parse_rate(text, r"Íbúðasparnaður\d*\s+(\d+[,\.]\d+)%")
 
-        # Mortgage loans
-        # Indexed mortgages
-        rates["mortgages"]["indexed"]["variable_ibudalan_i"] = self.parse_rate(text, r"Verðtryggð íbúðalán.*?Breytilegir vextir.*?Íbúðalán I.*?(\d+[,\.]\d+)%")
-        rates["mortgages"]["indexed"]["variable_ibudalan_ii"] = self.parse_rate(text, r"Íbúðalán II.*?(\d+[,\.]\d+)%")
-        rates["mortgages"]["indexed"]["variable_ibudalan_iii"] = self.parse_rate(text, r"Íbúðalán III.*?(\d+[,\.]\d+)%")
+        # Mortgage loans - Indexed mortgages
+        # Extract the indexed mortgage section first to avoid cross-contamination
+        indexed_section_match = re.search(r"Verðtryggð íbúðalán.*?(?=Óverðtryggð íbúðalán)", text, re.IGNORECASE | re.DOTALL)
+        indexed_text = indexed_section_match.group(0) if indexed_section_match else text
 
-        # Fixed 3 years
-        rates["mortgages"]["indexed"]["fixed_3yr_ibudalan_i"] = self.parse_rate(text, r"Fastir vextir í 3 ár.*?Íbúðalán I.*?(\d+[,\.]\d+)%")
-        rates["mortgages"]["indexed"]["fixed_3yr_ibudalan_ii"] = self.parse_rate(text, r"Fastir vextir í 3 ár.*?Íbúðalán II.*?(\d+[,\.]\d+)%")
+        rates["mortgages"]["indexed"]["variable_ibudalan_i"] = self.parse_rate(indexed_text, r"Breytilegir vextir\s+Íbúðalán I\s+(\d+[,\.]\d+)%")
+        rates["mortgages"]["indexed"]["variable_ibudalan_ii"] = self.parse_rate(indexed_text, r"Breytilegir vextir.*?Íbúðalán II\s+(\d+[,\.]\d+)%")
+        rates["mortgages"]["indexed"]["variable_ibudalan_iii"] = self.parse_rate(indexed_text, r"Breytilegir vextir.*?Íbúðalán III\s+(\d+[,\.]\d+)%")
 
-        # Unindexed mortgages
-        rates["mortgages"]["unindexed"]["variable_ibudalan_i"] = self.parse_rate(text, r"Óverðtryggð íbúðalán.*?Breytilegir vextir.*?Íbúðalán I.*?(\d+[,\.]\d+)%")
-        rates["mortgages"]["unindexed"]["variable_ibudalan_ii"] = self.parse_rate(text, r"Óverðtryggð.*?Íbúðalán II.*?(\d+[,\.]\d+)%")
+        # Fixed 3 years indexed
+        rates["mortgages"]["indexed"]["fixed_3yr_ibudalan_i"] = self.parse_rate(indexed_text, r"Fastir vextir í 3 ár\s+Íbúðalán I\s+(\d+[,\.]\d+)%")
+        rates["mortgages"]["indexed"]["fixed_3yr_ibudalan_ii"] = self.parse_rate(indexed_text, r"Fastir vextir í 3 ár.*?Íbúðalán II\s+(\d+[,\.]\d+)%")
 
-        # Vehicle loans
-        rates["vehicle_loans"]["kjor_electric_50_under"] = self.parse_rate(text, r"Rafmagn.*?50%.*?(\d+[,\.]\d+)%")
-        rates["vehicle_loans"]["kjor_electric_50_60"] = self.parse_rate(text, r"Rafmagn.*?50%.*?-.*?60%.*?(\d+[,\.]\d+)%")
+        # Unindexed mortgages - Extract section to avoid matching indexed rates
+        unindexed_section_match = re.search(r"Óverðtryggð íbúðalán.*?(?=Viðbótaríbúðalán|Kreditkort)", text, re.IGNORECASE | re.DOTALL)
+        unindexed_text = unindexed_section_match.group(0) if unindexed_section_match else text
+
+        rates["mortgages"]["unindexed"]["variable_ibudalan_i"] = self.parse_rate(unindexed_text, r"Breytilegir vextir\s+\d*\s*Íbúðalán I\s+(\d+[,\.]\d+)%")
+        rates["mortgages"]["unindexed"]["variable_ibudalan_ii"] = self.parse_rate(unindexed_text, r"Breytilegir vextir.*?Íbúðalán II\s+(\d+[,\.]\d+)%")
+
+        # Vehicle loans - look for the table structure
+        rates["vehicle_loans"]["kjor_electric_50_under"] = self.parse_rate(text, r"50%\s+og\s+undir\s+(\d+[,\.]\d+)%")
+        rates["vehicle_loans"]["kjor_electric_50_60"] = self.parse_rate(text, r"50%\s*-\s*60%\s+(\d+[,\.]\d+)%")
 
         # Overdrafts
-        rates["overdrafts"]["yfirdrattarlan_einstaklinga"] = self.parse_rate(text, r"Yfirdráttarlán einstaklinga.*?(\d+[,\.]\d+)%")
-        rates["overdrafts"]["framfaerslulán"] = self.parse_rate(text, r"Framfærslulán.*?Menntasjóðs.*?(\d+[,\.]\d+)%")
+        rates["overdrafts"]["yfirdrattarlan_einstaklinga"] = self.parse_rate(text, r"Yfirdráttarlán einstaklinga\s+(\d+[,\.]\d+)%")
+        rates["overdrafts"]["framfaerslulán"] = self.parse_rate(text, r"Framfærslulán\s+vegna\s+Menntasjóðs\s+námsm\.\s+(\d+[,\.]\d+)%")
 
         # Credit cards
-        rates["credit_cards"]["greidsludreifing"] = self.parse_rate(text, r"Greiðsludreifing.*?kreditkorta.*?(\d+[,\.]\d+)%")
+        rates["credit_cards"]["greidsludreifing"] = self.parse_rate(text, r"Greiðsludreifing\s+og\s+veltuvextir\s+kreditkorta\s+(\d+[,\.]\d+)%")
 
-        # Penalty interest
-        rates["penalty_interest"] = self.parse_rate(text, r"Dráttarvextir.*?(\d+[,\.]\d+)%")
+        # Penalty interest - look specifically for the official penalty rate
+        rates["penalty_interest"] = self.parse_rate(text, r"Dráttarvextir\s+skv\.\s+ákvörðun\s+SÍ\s+(\d+[,\.]\d+)%")
 
         return rates
 
