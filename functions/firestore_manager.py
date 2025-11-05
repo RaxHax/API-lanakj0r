@@ -1,0 +1,207 @@
+"""
+Firestore manager for caching interest rate data
+"""
+from datetime import datetime, timedelta
+from typing import Dict, Optional
+import logging
+
+try:
+    from google.cloud import firestore
+    from google.cloud.firestore_v1.base_query import FieldFilter
+except ImportError:
+    # For local testing without Firebase
+    firestore = None
+
+logger = logging.getLogger(__name__)
+
+
+class FirestoreManager:
+    """Manager for Firestore operations"""
+
+    COLLECTION_NAME = "interest_rates"
+    CACHE_DURATION_HOURS = 24
+
+    def __init__(self):
+        """Initialize Firestore client"""
+        if firestore:
+            try:
+                self.db = firestore.Client()
+                logger.info("Firestore client initialized")
+            except Exception as e:
+                logger.warning(f"Could not initialize Firestore client: {e}")
+                self.db = None
+        else:
+            logger.warning("Firestore library not available")
+            self.db = None
+
+    def get_cached_rates(self) -> Optional[Dict]:
+        """
+        Get cached interest rates from Firestore
+
+        Returns:
+            Dict: Cached data with rates, or None if cache miss or expired
+        """
+        if not self.db:
+            logger.warning("Firestore not available, cannot get cached rates")
+            return None
+
+        try:
+            # Get the most recent document
+            docs = (
+                self.db.collection(self.COLLECTION_NAME)
+                .order_by("last_updated", direction=firestore.Query.DESCENDING)
+                .limit(1)
+                .stream()
+            )
+
+            doc = next(docs, None)
+            if not doc:
+                logger.info("No cached rates found")
+                return None
+
+            data = doc.to_dict()
+
+            # Check if cache is still valid
+            last_updated = data.get("last_updated")
+            if not last_updated:
+                logger.warning("Cached data has no last_updated timestamp")
+                return None
+
+            # Convert to datetime if it's a timestamp
+            if hasattr(last_updated, 'timestamp'):
+                last_updated = datetime.fromtimestamp(last_updated.timestamp())
+            elif isinstance(last_updated, str):
+                last_updated = datetime.fromisoformat(last_updated.replace('Z', '+00:00'))
+
+            # Check if cache is expired
+            cache_age = datetime.utcnow() - last_updated.replace(tzinfo=None)
+            if cache_age > timedelta(hours=self.CACHE_DURATION_HOURS):
+                logger.info(f"Cache expired (age: {cache_age})")
+                return None
+
+            logger.info("Retrieved valid cached rates")
+            return data
+
+        except Exception as e:
+            logger.error(f"Error getting cached rates: {e}")
+            return None
+
+    def save_rates(self, rate_data: Dict, source_url: str) -> bool:
+        """
+        Save interest rates to Firestore
+
+        Args:
+            rate_data: Parsed interest rate data
+            source_url: URL of the source PDF
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if not self.db:
+            logger.warning("Firestore not available, cannot save rates")
+            return False
+
+        try:
+            # Prepare document
+            doc_data = {
+                "effective_date": rate_data.get("effective_date"),
+                "last_updated": firestore.SERVER_TIMESTAMP,
+                "data": rate_data,
+                "source_url": source_url,
+                "cached": True
+            }
+
+            # Add document to collection
+            doc_ref = self.db.collection(self.COLLECTION_NAME).document()
+            doc_ref.set(doc_data)
+
+            logger.info(f"Successfully saved rates to Firestore (doc_id: {doc_ref.id})")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error saving rates to Firestore: {e}")
+            return False
+
+    def clear_old_caches(self, keep_latest: int = 5) -> int:
+        """
+        Clean up old cached entries, keeping only the most recent ones
+
+        Args:
+            keep_latest: Number of most recent entries to keep
+
+        Returns:
+            int: Number of documents deleted
+        """
+        if not self.db:
+            logger.warning("Firestore not available, cannot clear old caches")
+            return 0
+
+        try:
+            # Get all documents ordered by last_updated
+            docs = (
+                self.db.collection(self.COLLECTION_NAME)
+                .order_by("last_updated", direction=firestore.Query.DESCENDING)
+                .stream()
+            )
+
+            all_docs = list(docs)
+            if len(all_docs) <= keep_latest:
+                logger.info(f"No old caches to clear ({len(all_docs)} docs)")
+                return 0
+
+            # Delete old documents
+            deleted_count = 0
+            for doc in all_docs[keep_latest:]:
+                doc.reference.delete()
+                deleted_count += 1
+
+            logger.info(f"Deleted {deleted_count} old cache entries")
+            return deleted_count
+
+        except Exception as e:
+            logger.error(f"Error clearing old caches: {e}")
+            return 0
+
+    def format_response(self, data: Dict, from_cache: bool = True) -> Dict:
+        """
+        Format data for API response
+
+        Args:
+            data: Raw data from Firestore or parser
+            from_cache: Whether data came from cache
+
+        Returns:
+            Dict: Formatted response
+        """
+        # Handle different data structures
+        if "data" in data:
+            # From Firestore
+            rate_data = data["data"]
+            effective_date = data.get("effective_date")
+            source_url = data.get("source_url")
+            last_updated = data.get("last_updated")
+        else:
+            # From parser
+            rate_data = data
+            effective_date = data.get("effective_date")
+            source_url = data.get("source_url")
+            last_updated = datetime.utcnow()
+
+        # Convert timestamp to ISO format
+        if hasattr(last_updated, 'timestamp'):
+            last_updated = datetime.fromtimestamp(last_updated.timestamp())
+
+        if isinstance(last_updated, datetime):
+            last_updated_str = last_updated.strftime('%Y-%m-%dT%H:%M:%SZ')
+        elif isinstance(last_updated, str):
+            last_updated_str = last_updated
+        else:
+            last_updated_str = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+
+        return {
+            "effective_date": effective_date,
+            "last_updated": last_updated_str,
+            "data": rate_data,
+            "source_url": source_url,
+            "cached": from_cache
+        }

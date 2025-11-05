@@ -1,0 +1,182 @@
+{
+  "effective_date": "2025-10-24",
+  "last_updated": "2025-11-05T10:30:00Z",
+  "data": {
+    "deposits": {
+      "veltureikningar": {
+        "almennir_veltureikningar": 0.75,
+        "einkareikningar": 0.75,
+        "namu_klassareikningar": 0.75,
+        "vordureikningar": {
+          "tier_1": 0.75,
+          "tier_2": 0.90
+        }
+      },
+      "sparireikningar": {
+        "kjorbok": 1.40,
+        "markmi_app": {
+          "unindexed": 6.90,
+          "indexed": 7.12
+        },
+        "vaxtareikningur": {
+          "tier_0_1m": {
+            "indexed": 5.56,
+            "unindexed": 5.70
+          },
+          "tier_1m_5m": {
+            "indexed": 5.65,
+            "unindexed": 5.80
+          },
+          "tier_5m_20m": {
+            "indexed": 5.75,
+            "unindexed": 5.90
+          },
+          "tier_20m_plus": {
+            "indexed": 5.84,
+            "unindexed": 6.00
+          }
+        },
+        "vaxtareikningur_30": {
+          "tier_0_1m": 6.50,
+          "tier_1m_5m": 6.70,
+          "tier_5m_20m": 6.90,
+          "tier_20m_60m": 7.10,
+          "tier_60m_plus": 7.30
+        },
+        "fastvaxtareikningar": {
+          "3_months": 7.30,
+          "6_months": 7.30,
+          "12_months": 7.25,
+          "24_months": 7.20
+        },
+        "framti_argrunnur": {
+          "indexed": 2.55,
+          "unindexed": 7.95
+        },
+        "fasteignagrunnur": {
+          "indexed": 2.55,
+          "unindexed": 7.95
+        },
+        "lifeyrisbok": {
+          "indexed": 1.90,
+          "unindexed": 7.80
+        }
+      },
+      "foreign_currency": {
+        "USD": {
+          "unbound": 4.15,
+          "3_months": 4.30,
+          "6_months": 4.45
+        },
+        "EUR": {
+          "unbound": 2.05,
+          "3_months": 2.20,
+          "6_months": 2.35
+        },
+        "GBP": {
+          "unbound": 4.25,
+          "3_months": 4.40,
+          "6_months": 4.55
+        }
+      }
+    },
+    "mortgages": {
+      "unindexed": {
+        "fixed_rates": {
+          "up_to_55_ltv": {
+            "1_year": 8.60,
+            "3_year": 8.40,
+            "5_year": 8.15
+          },
+          "up_to_65_ltv": {
+            "1_year": 8.75,
+            "3_year": 8.55,
+            "5_year": 8.30
+          },
+          "up_to_75_ltv": {
+            "1_year": 8.90,
+            "3_year": 8.70,
+            "5_year": 8.45
+          },
+          "up_to_80_85_ltv": {
+            "1_year": 9.10,
+            "3_year": 8.90,
+            "5_year": 8.65
+          }
+        },
+        "variable_rates": {
+          "up_to_85_ltv": {
+            "fixed_premium": 2.50,
+            "total_rate": 10.00
+          }
+        },
+        "old_loans": {
+          "grunnlan_up_to_70": 9.00,
+          "vibotar_70_80_85": 10.00
+        }
+      },
+      "indexed": {
+        "fixed_rates": {
+          "up_to_75_ltv": 4.85,
+          "up_to_85_ltv": 5.15
+        },
+        "old_loans": {
+          "grunnlan_up_to_70": 4.00,
+          "vibotar_70_80_85": 5.00
+        }
+      }
+    },
+    "vehicle_loans": {
+      "electric_vehicles": {
+        "ltv_under_51": 9.80,
+        "ltv_51_69": 10.40,
+        "ltv_70_80": 10.60
+      },
+      "other_vehicles": {
+        "ltv_under_51": 10.20,
+        "ltv_51_69": 10.90,
+        "ltv_70_80": 11.20
+      }
+    },
+    "bonds_and_loans": {
+      "kjorvaxtaflokkar": {
+        "kjorvaxtaflokkur_0": {
+          "indexed": 5.20,
+          "unindexed": 9.80
+        },
+        "kjorvaxtaflokkur_1": {
+          "indexed": 6.20,
+          "unindexed": 10.80
+        },
+        "kjorvaxtaflokkur_2": {
+          "indexed": 7.20,
+          "unindexed": 11.80
+        },
+        "kjorvaxtaflokkur_3": {
+          "indexed": 8.10,
+          "unindexed": 12.70
+        }
+      },
+      "tm_kjorvextir": {
+        "indexed": 4.35,
+        "unindexed": 11.10
+      }
+    },
+    "short_term_loans": {
+      "overdrafts": {
+        "fyrirtaekja": 15.25,
+        "einstaklinga": 15.25,
+        "vordufélaga_high": 15.25,
+        "vordufélaga_low": 14.50,
+        "naman_menntasjo_ur": 10.55,
+        "naman_almennir": 12.55
+      },
+      "credit_cards": {
+        "greiðsludreifing": 15.20
+      }
+    },
+    "penalty_interest": 15.25
+  },
+  "source_url": "https://www.landsbankinn.is/library/Skjol/Fyrirtaekjasidur/Verdskra/vaxtatafla-landsbankans.pdf",
+  "cached": true
+}
