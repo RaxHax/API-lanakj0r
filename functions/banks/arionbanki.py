@@ -5,6 +5,7 @@ import requests
 import re
 import logging
 import io
+from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 from typing import Dict, Optional, Tuple
 from datetime import datetime
@@ -34,6 +35,9 @@ class ArionBankiScraper(BankScraper):
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
         })
+        # Ensure we do not inherit proxy settings from the environment which can
+        # cause connectivity issues in serverless environments
+        self.session.trust_env = False
 
     def try_api(self) -> Tuple[Optional[Dict], Optional[str]]:
         """Try to get rates from Arion Bank's open API"""
@@ -53,8 +57,51 @@ class ArionBankiScraper(BankScraper):
             logger.info(f"API not available, will try PDF: {e}")
             return None, None
 
+    def _make_absolute_url(self, url: str) -> str:
+        """Create an absolute URL for the Arion Bank website."""
+        if not url:
+            return ""
+
+        url = url.strip()
+        if url.startswith("http"):
+            return url
+
+        return urljoin(self.BASE_URL, url)
+
+    def _find_pdf_in_detail_page(self, page_url: str) -> Optional[str]:
+        """Follow an intermediate page to look for the actual PDF link."""
+        try:
+            logger.info(f"Fetching detail page for PDF discovery: {page_url}")
+            response = self.session.get(page_url, timeout=30)
+            response.raise_for_status()
+
+            soup = BeautifulSoup(response.content, 'html.parser')
+
+            for element in soup.find_all(['a', 'button']):
+                candidate_urls = [
+                    element.get('href'),
+                    element.get('data-file'),
+                    element.get('data-file-url'),
+                    element.get('data-url'),
+                ]
+
+                for candidate in candidate_urls:
+                    if not candidate:
+                        continue
+                    absolute = self._make_absolute_url(candidate)
+                    if absolute.lower().endswith('.pdf'):
+                        logger.info(f"Found PDF link on detail page: {absolute}")
+                        return absolute
+
+            logger.warning("No PDF link found on detail page")
+            return None
+
+        except Exception as e:
+            logger.error(f"Error fetching PDF detail page: {e}")
+            return None
+
     def get_pdf_url(self) -> Optional[str]:
-        """Find the latest individual rates PDF URL"""
+        """Find the latest individual rates PDF URL."""
         try:
             logger.info(f"Fetching webpage: {self.BASE_URL}")
             response = self.session.get(self.BASE_URL, timeout=30)
@@ -62,17 +109,33 @@ class ArionBankiScraper(BankScraper):
 
             soup = BeautifulSoup(response.content, 'html.parser')
 
-            # Look for "Vaxtatafla einstaklinga" PDF link
-            for link in soup.find_all('a', href=True):
-                href = link['href']
-                link_text = link.get_text().lower()
+            # Look for "Vaxtatafla einstaklinga" PDF link or intermediate page
+            for element in soup.find_all(['a', 'button']):
+                text = element.get_text(separator=' ', strip=True).lower()
+                if 'vaxtatafla' not in text or 'einstaklinga' not in text:
+                    continue
 
-                if ('vaxtatafla' in link_text and 'einstaklinga' in link_text) or \
-                   (href.endswith('.pdf') and 'vaxta' in href.lower() and 'einstakl' in href.lower()):
-                    if href.startswith('http'):
-                        return href
-                    else:
-                        return f"https://www.arionbanki.is{href}"
+                candidate_urls = [
+                    element.get('href'),
+                    element.get('data-file'),
+                    element.get('data-file-url'),
+                    element.get('data-url'),
+                ]
+
+                for candidate in candidate_urls:
+                    if not candidate or candidate.lower().startswith('javascript'):
+                        continue
+
+                    absolute = self._make_absolute_url(candidate)
+
+                    if absolute.lower().endswith('.pdf'):
+                        logger.info(f"Found direct PDF link: {absolute}")
+                        return absolute
+
+                    # Some links lead to an intermediate page where the PDF is located
+                    pdf_from_detail = self._find_pdf_in_detail_page(absolute)
+                    if pdf_from_detail:
+                        return pdf_from_detail
 
             logger.warning("No PDF link found")
             return None
