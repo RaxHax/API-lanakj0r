@@ -1,0 +1,13 @@
+# Local testing dependencies
+Flask>=3.0.0
+
+# Web scraping
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+
+# PDF parsing
+pdfminer.six>=20221105
+
+# Optional: for better development experience
+python-dotenv>=1.0.0

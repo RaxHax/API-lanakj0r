@@ -1,0 +1,16 @@
+# Firebase Cloud Functions dependencies
+firebase-functions>=0.4.0
+firebase-admin>=6.2.0
+
+# Web scraping
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+
+# PDF parsing
+pdfminer.six>=20221105
+
+# Web framework
+Flask>=3.0.0
+
+# Google Cloud
+google-cloud-firestore>=2.13.0
