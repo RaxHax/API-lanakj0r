@@ -34,9 +34,13 @@ class FirestoreManager:
             logger.warning("Firestore library not available")
             self.db = None
 
-    def get_cached_rates(self) -> Optional[Dict]:
+    def get_cached_rates(self, bank_id: Optional[str] = None) -> Optional[Dict]:
         """
         Get cached interest rates from Firestore
+
+        Args:
+            bank_id: Specific bank ID to get rates for (e.g., 'landsbankinn', 'arionbanki', 'islandsbanki')
+                     If None, returns most recent cache (backwards compatible)
 
         Returns:
             Dict: Cached data with rates, or None if cache miss or expired
@@ -46,17 +50,23 @@ class FirestoreManager:
             return None
 
         try:
+            # Build query
+            query = self.db.collection(self.COLLECTION_NAME)
+
+            # Filter by bank if specified
+            if bank_id:
+                query = query.where("bank_id", "==", bank_id)
+
             # Get the most recent document
             docs = (
-                self.db.collection(self.COLLECTION_NAME)
-                .order_by("last_updated", direction=firestore.Query.DESCENDING)
+                query.order_by("last_updated", direction=firestore.Query.DESCENDING)
                 .limit(1)
                 .stream()
             )
 
             doc = next(docs, None)
             if not doc:
-                logger.info("No cached rates found")
+                logger.info(f"No cached rates found for bank: {bank_id or 'any'}")
                 return None
 
             data = doc.to_dict()
@@ -79,20 +89,22 @@ class FirestoreManager:
                 logger.info(f"Cache expired (age: {cache_age})")
                 return None
 
-            logger.info("Retrieved valid cached rates")
+            logger.info(f"Retrieved valid cached rates for bank: {bank_id or 'any'}")
             return data
 
         except Exception as e:
             logger.error(f"Error getting cached rates: {e}")
             return None
 
-    def save_rates(self, rate_data: Dict, source_url: str) -> bool:
+    def save_rates(self, rate_data: Dict, source_url: str, bank_id: str = "landsbankinn", bank_name: str = "Landsbankinn") -> bool:
         """
         Save interest rates to Firestore
 
         Args:
             rate_data: Parsed interest rate data
-            source_url: URL of the source PDF
+            source_url: URL of the source PDF/webpage
+            bank_id: Bank identifier (landsbankinn, arionbanki, islandsbanki)
+            bank_name: Bank display name
 
         Returns:
             bool: True if successful, False otherwise
@@ -104,6 +116,8 @@ class FirestoreManager:
         try:
             # Prepare document
             doc_data = {
+                "bank_id": bank_id,
+                "bank_name": bank_name,
                 "effective_date": rate_data.get("effective_date"),
                 "last_updated": firestore.SERVER_TIMESTAMP,
                 "data": rate_data,
@@ -115,7 +129,7 @@ class FirestoreManager:
             doc_ref = self.db.collection(self.COLLECTION_NAME).document()
             doc_ref.set(doc_data)
 
-            logger.info(f"Successfully saved rates to Firestore (doc_id: {doc_ref.id})")
+            logger.info(f"Successfully saved rates for {bank_name} to Firestore (doc_id: {doc_ref.id})")
             return True
 
         except Exception as e:
@@ -161,6 +175,21 @@ class FirestoreManager:
         except Exception as e:
             logger.error(f"Error clearing old caches: {e}")
             return 0
+
+    def get_all_banks_rates(self) -> Dict[str, Optional[Dict]]:
+        """
+        Get cached rates for all banks
+
+        Returns:
+            Dict: Dictionary mapping bank_id to rate data
+        """
+        banks = ['landsbankinn', 'arionbanki', 'islandsbanki']
+        result = {}
+
+        for bank_id in banks:
+            result[bank_id] = self.get_cached_rates(bank_id=bank_id)
+
+        return result
 
     def format_response(self, data: Dict, from_cache: bool = True) -> Dict:
         """
