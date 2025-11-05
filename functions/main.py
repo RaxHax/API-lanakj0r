@@ -1,13 +1,13 @@
 """
-Firebase Cloud Functions for Landsbankinn Interest Rate API
+Firebase Cloud Functions for Multi-Bank Interest Rate API
+Supports: Landsbankinn, Arion Bank, Íslandsbanki
 """
 import logging
-from flask import jsonify
+from flask import jsonify, request
 from firebase_functions import https_fn
 from firebase_admin import initialize_app
 
-from scraper import LandsbankinScraper
-from parser import InterestRateParser
+from banks import get_bank_scraper, AVAILABLE_BANKS
 from firestore_manager import FirestoreManager
 
 # Initialize Firebase Admin
@@ -24,49 +24,67 @@ logger = logging.getLogger(__name__)
 @https_fn.on_request()
 def get_rates(req: https_fn.Request) -> https_fn.Response:
     """
-    GET /api/rates - Return cached interest rates
+    GET /api/rates?bank=<bank_id>
+
+    Get interest rates for a specific bank or all banks
+
+    Query Parameters:
+        bank: Optional bank ID (landsbankinn, arionbanki, islandsbanki)
+              If not provided, returns rates for all banks
 
     Returns cached data if available and not expired,
-    otherwise scrapes and parses the latest PDF
+    otherwise scrapes and parses the latest data
     """
     try:
-        logger.info("GET /api/rates - Request received")
+        # Get bank parameter
+        bank_id = request.args.get('bank', '').lower()
 
-        # Initialize managers
+        logger.info(f"GET /api/rates - bank={bank_id or 'all'}")
+
+        # Initialize Firestore manager
         firestore_mgr = FirestoreManager()
 
+        # If no bank specified, return all banks
+        if not bank_id:
+            return get_all_banks_rates(firestore_mgr)
+
+        # Validate bank ID
+        if bank_id not in AVAILABLE_BANKS:
+            return jsonify({
+                "error": f"Invalid bank: {bank_id}",
+                "available_banks": list(AVAILABLE_BANKS.keys())
+            }), 400
+
         # Try to get cached data
-        cached_data = firestore_mgr.get_cached_rates()
+        cached_data = firestore_mgr.get_cached_rates(bank_id=bank_id)
 
         if cached_data:
-            logger.info("Returning cached rates")
+            logger.info(f"Returning cached rates for {bank_id}")
             response = firestore_mgr.format_response(cached_data, from_cache=True)
             return jsonify(response)
 
-        # Cache miss - scrape and parse
-        logger.info("Cache miss - scraping latest PDF")
+        # Cache miss - scrape fresh data
+        logger.info(f"Cache miss - scraping {bank_id}")
 
-        scraper = LandsbankinScraper()
-        pdf_content, pdf_url = scraper.scrape_latest_pdf()
+        # Get bank scraper
+        scraper = get_bank_scraper(bank_id)
 
-        if not pdf_content:
-            logger.error("Failed to scrape PDF")
-            return jsonify({
-                "error": "Failed to scrape PDF from Landsbankinn website"
-            }), 500
-
-        # Parse PDF
-        parser = InterestRateParser()
-        rate_data = parser.parse_all(pdf_content)
+        # Scrape rates
+        rate_data, source_url = scraper.scrape_rates()
 
         if not rate_data:
-            logger.error("Failed to parse PDF")
+            logger.error(f"Failed to scrape rates from {bank_id}")
             return jsonify({
-                "error": "Failed to parse interest rate data from PDF"
+                "error": f"Failed to scrape rates from {scraper.bank_name}"
             }), 500
 
         # Save to Firestore
-        firestore_mgr.save_rates(rate_data, pdf_url)
+        firestore_mgr.save_rates(
+            rate_data,
+            source_url,
+            bank_id=scraper.bank_id,
+            bank_name=scraper.bank_name
+        )
 
         # Clean up old caches
         firestore_mgr.clear_old_caches(keep_latest=5)
@@ -74,14 +92,16 @@ def get_rates(req: https_fn.Request) -> https_fn.Response:
         # Return fresh data
         response = firestore_mgr.format_response(
             {
+                "bank_id": scraper.bank_id,
+                "bank_name": scraper.bank_name,
                 "data": rate_data,
                 "effective_date": rate_data.get("effective_date"),
-                "source_url": pdf_url
+                "source_url": source_url
             },
             from_cache=False
         )
 
-        logger.info("Returning freshly scraped rates")
+        logger.info(f"Returning freshly scraped rates for {bank_id}")
         return jsonify(response)
 
     except Exception as e:
@@ -92,42 +112,125 @@ def get_rates(req: https_fn.Request) -> https_fn.Response:
         }), 500
 
 
+def get_all_banks_rates(firestore_mgr: FirestoreManager):
+    """Get rates for all banks"""
+    try:
+        logger.info("Fetching rates for all banks")
+
+        all_rates = {}
+        any_fresh = False
+
+        for bank_id in AVAILABLE_BANKS.keys():
+            # Try cache first
+            cached_data = firestore_mgr.get_cached_rates(bank_id=bank_id)
+
+            if cached_data:
+                all_rates[bank_id] = firestore_mgr.format_response(cached_data, from_cache=True)
+            else:
+                # Scrape fresh data
+                try:
+                    scraper = get_bank_scraper(bank_id)
+                    rate_data, source_url = scraper.scrape_rates()
+
+                    if rate_data:
+                        # Save to cache
+                        firestore_mgr.save_rates(
+                            rate_data,
+                            source_url,
+                            bank_id=scraper.bank_id,
+                            bank_name=scraper.bank_name
+                        )
+
+                        all_rates[bank_id] = firestore_mgr.format_response(
+                            {
+                                "bank_id": scraper.bank_id,
+                                "bank_name": scraper.bank_name,
+                                "data": rate_data,
+                                "effective_date": rate_data.get("effective_date"),
+                                "source_url": source_url
+                            },
+                            from_cache=False
+                        )
+                        any_fresh = True
+                    else:
+                        all_rates[bank_id] = {
+                            "error": f"Failed to scrape {bank_id}"
+                        }
+
+                except Exception as e:
+                    logger.error(f"Error scraping {bank_id}: {e}")
+                    all_rates[bank_id] = {
+                        "error": str(e)
+                    }
+
+        # Clean up old caches if we fetched fresh data
+        if any_fresh:
+            firestore_mgr.clear_old_caches(keep_latest=5)
+
+        return jsonify({
+            "banks": all_rates,
+            "available_banks": list(AVAILABLE_BANKS.keys())
+        })
+
+    except Exception as e:
+        logger.error(f"Error getting all banks rates: {e}", exc_info=True)
+        return jsonify({
+            "error": "Internal server error",
+            "details": str(e)
+        }), 500
+
+
 @https_fn.on_request()
 def refresh_rates(req: https_fn.Request) -> https_fn.Response:
     """
-    GET /api/rates/refresh - Force refresh of interest rates
+    GET /api/rates/refresh?bank=<bank_id>
 
-    Scrapes and parses the latest PDF regardless of cache status
+    Force refresh of interest rates
+
+    Query Parameters:
+        bank: Optional bank ID (landsbankinn, arionbanki, islandsbanki)
+              If not provided, refreshes all banks
     """
     try:
-        logger.info("GET /api/rates/refresh - Request received")
+        # Get bank parameter
+        bank_id = request.args.get('bank', '').lower()
+
+        logger.info(f"GET /api/rates/refresh - bank={bank_id or 'all'}")
 
         # Initialize managers
-        scraper = LandsbankinScraper()
-        parser = InterestRateParser()
         firestore_mgr = FirestoreManager()
 
-        # Scrape latest PDF
-        logger.info("Scraping latest PDF (forced refresh)")
-        pdf_content, pdf_url = scraper.scrape_latest_pdf()
+        # If no bank specified, refresh all banks
+        if not bank_id:
+            return refresh_all_banks_rates(firestore_mgr)
 
-        if not pdf_content:
-            logger.error("Failed to scrape PDF")
+        # Validate bank ID
+        if bank_id not in AVAILABLE_BANKS:
             return jsonify({
-                "error": "Failed to scrape PDF from Landsbankinn website"
-            }), 500
+                "error": f"Invalid bank: {bank_id}",
+                "available_banks": list(AVAILABLE_BANKS.keys())
+            }), 400
 
-        # Parse PDF
-        rate_data = parser.parse_all(pdf_content)
+        # Get bank scraper
+        scraper = get_bank_scraper(bank_id)
+
+        # Scrape rates
+        logger.info(f"Force refreshing rates for {bank_id}")
+        rate_data, source_url = scraper.scrape_rates()
 
         if not rate_data:
-            logger.error("Failed to parse PDF")
+            logger.error(f"Failed to scrape rates from {bank_id}")
             return jsonify({
-                "error": "Failed to parse interest rate data from PDF"
+                "error": f"Failed to scrape rates from {scraper.bank_name}"
             }), 500
 
         # Save to Firestore
-        firestore_mgr.save_rates(rate_data, pdf_url)
+        firestore_mgr.save_rates(
+            rate_data,
+            source_url,
+            bank_id=scraper.bank_id,
+            bank_name=scraper.bank_name
+        )
 
         # Clean up old caches
         firestore_mgr.clear_old_caches(keep_latest=5)
@@ -135,18 +238,78 @@ def refresh_rates(req: https_fn.Request) -> https_fn.Response:
         # Return fresh data
         response = firestore_mgr.format_response(
             {
+                "bank_id": scraper.bank_id,
+                "bank_name": scraper.bank_name,
                 "data": rate_data,
                 "effective_date": rate_data.get("effective_date"),
-                "source_url": pdf_url
+                "source_url": source_url
             },
             from_cache=False
         )
 
-        logger.info("Returning freshly scraped rates (forced refresh)")
+        logger.info(f"Returning force-refreshed rates for {bank_id}")
         return jsonify(response)
 
     except Exception as e:
         logger.error(f"Error in refresh_rates: {e}", exc_info=True)
+        return jsonify({
+            "error": "Internal server error",
+            "details": str(e)
+        }), 500
+
+
+def refresh_all_banks_rates(firestore_mgr: FirestoreManager):
+    """Force refresh rates for all banks"""
+    try:
+        logger.info("Force refreshing rates for all banks")
+
+        all_rates = {}
+
+        for bank_id in AVAILABLE_BANKS.keys():
+            try:
+                scraper = get_bank_scraper(bank_id)
+                rate_data, source_url = scraper.scrape_rates()
+
+                if rate_data:
+                    # Save to cache
+                    firestore_mgr.save_rates(
+                        rate_data,
+                        source_url,
+                        bank_id=scraper.bank_id,
+                        bank_name=scraper.bank_name
+                    )
+
+                    all_rates[bank_id] = firestore_mgr.format_response(
+                        {
+                            "bank_id": scraper.bank_id,
+                            "bank_name": scraper.bank_name,
+                            "data": rate_data,
+                            "effective_date": rate_data.get("effective_date"),
+                            "source_url": source_url
+                        },
+                        from_cache=False
+                    )
+                else:
+                    all_rates[bank_id] = {
+                        "error": f"Failed to scrape {bank_id}"
+                    }
+
+            except Exception as e:
+                logger.error(f"Error scraping {bank_id}: {e}")
+                all_rates[bank_id] = {
+                    "error": str(e)
+                }
+
+        # Clean up old caches
+        firestore_mgr.clear_old_caches(keep_latest=5)
+
+        return jsonify({
+            "banks": all_rates,
+            "available_banks": list(AVAILABLE_BANKS.keys())
+        })
+
+    except Exception as e:
+        logger.error(f"Error refreshing all banks rates: {e}", exc_info=True)
         return jsonify({
             "error": "Internal server error",
             "details": str(e)

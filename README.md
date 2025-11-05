@@ -1,19 +1,25 @@
-# Landsbankinn Interest Rate API
+# Icelandic Banks Interest Rate API
 
-A Python API that scrapes the latest interest rates from Landsbankinn's website and serves them via a REST API. Built for Firebase Cloud Functions with Firestore caching.
+A Python API that scrapes the latest interest rates from **three major Icelandic banks** and serves them via a REST API. Built for Firebase Cloud Functions with Firestore caching.
 
+> **🏦 Multi-Bank Support**: Landsbankinn, Arion banki, and Íslandsbanki!
+>
 > **⚡ Quick Start**: See [QUICKSTART.md](QUICKSTART.md) to get running in 5 minutes!
 >
 > **📋 Example Response**: See [example_response.json](example_response.json) for the complete API response structure
+>
+> **🔧 Multi-Bank Guide**: See [MULTI_BANK_SUPPORT.md](MULTI_BANK_SUPPORT.md) for complete multi-bank documentation
 
 ## Features
 
-- 🔄 Automatic PDF scraping from Landsbankinn's website
+- 🏦 **Multi-bank support**: Landsbankinn, Arion banki, Íslandsbanki
+- 🔄 Multiple scraping strategies (PDF, API, HTML)
 - 📊 Comprehensive parsing of all interest rate categories
-- 💾 Firestore caching (24-hour duration)
+- 💾 Firestore caching with per-bank storage (24-hour duration)
 - 🚀 Firebase Cloud Functions deployment
 - 🧪 Local testing with Flask
 - 📱 iOS-ready JSON API
+- 🔍 Query specific banks or get all at once
 
 ## Architecture
 
@@ -22,26 +28,32 @@ A Python API that scrapes the latest interest rates from Landsbankinn's website 
 │  iOS App    │
 │ (Dreamflow) │
 └──────┬──────┘
-       │
+       │ ?bank=landsbankinn|arionbanki|islandsbanki
        ▼
-┌─────────────────┐
-│ Cloud Functions │
-│  - get_rates    │
-│  - refresh_rates│
-└────────┬────────┘
-         │
-    ┌────┴────┐
-    ▼         ▼
-┌─────────┐  ┌──────────┐
-│Firestore│  │ Scraper  │
-│ Cache   │  │ + Parser │
-└─────────┘  └──────────┘
+┌─────────────────────────┐
+│   Cloud Functions       │
+│ - get_rates (all/single)│
+│ - refresh_rates         │
+└─────────┬───────────────┘
+          │
+    ┌─────┴──────┐
+    ▼            ▼
+┌─────────┐  ┌──────────────────┐
+│Firestore│  │  Bank Scrapers   │
+│ Cache   │  ├──────────────────┤
+│(per-bank│  │ • Landsbankinn   │
+│storage) │  │   (PDF)          │
+└─────────┘  │ • Arion banki    │
+             │   (API/PDF)      │
+             │ • Íslandsbanki   │
+             │   (HTML)         │
+             └─────┬────────────┘
                    │
-                   ▼
-            ┌──────────────┐
-            │ Landsbankinn │
-            │   Website    │
-            └──────────────┘
+           ┌───────┴────────┐
+           ▼                ▼
+    ┌──────────┐    ┌──────────────┐
+    │   PDFs   │    │Bank Websites │
+    └──────────┘    └──────────────┘
 ```
 
 ## Data Extracted
@@ -271,25 +283,28 @@ class RatesService {
 
 ## API Endpoints
 
-### GET /api/rates
+### GET /api/rates?bank=<bank_id>
 
-Returns cached interest rates if available and not expired (< 24 hours old), otherwise scrapes fresh data.
+Get interest rates for a specific bank.
+
+**Parameters:**
+- `bank`: Bank ID (`landsbankinn`, `arionbanki`, or `islandsbanki`)
+
+**Example:**
+```bash
+curl "https://your-project.cloudfunctions.net/get_rates?bank=landsbankinn"
+```
 
 **Response:**
 ```json
 {
+  "bank_id": "landsbankinn",
+  "bank_name": "Landsbankinn",
   "effective_date": "2025-10-24",
   "last_updated": "2025-11-05T10:30:00Z",
   "data": {
-    "deposits": {
-      "veltureikningar": { ... },
-      "sparireikningar": { ... },
-      "foreign_currency": { ... }
-    },
-    "mortgages": {
-      "unindexed": { ... },
-      "indexed": { ... }
-    },
+    "deposits": { ... },
+    "mortgages": { ... },
     "vehicle_loans": { ... },
     "bonds_and_loans": { ... },
     "short_term_loans": { ... },
@@ -300,11 +315,62 @@ Returns cached interest rates if available and not expired (< 24 hours old), oth
 }
 ```
 
-### GET /api/rates/refresh
+### GET /api/rates
 
-Forces a fresh scrape of the PDF regardless of cache status.
+Get interest rates for **all banks**.
 
-**Response:** Same as above, with `"cached": false`
+**Example:**
+```bash
+curl "https://your-project.cloudfunctions.net/get_rates"
+```
+
+**Response:**
+```json
+{
+  "banks": {
+    "landsbankinn": {
+      "bank_id": "landsbankinn",
+      "bank_name": "Landsbankinn",
+      "effective_date": "2025-10-24",
+      "data": { ... },
+      "cached": true
+    },
+    "arionbanki": {
+      "bank_id": "arionbanki",
+      "bank_name": "Arion banki",
+      "effective_date": "2025-10-30",
+      "data": { ... },
+      "cached": true
+    },
+    "islandsbanki": {
+      "bank_id": "islandsbanki",
+      "bank_name": "Íslandsbanki",
+      "effective_date": "2025-11-01",
+      "data": { ... },
+      "cached": false
+    }
+  },
+  "available_banks": ["landsbankinn", "arionbanki", "islandsbanki"]
+}
+```
+
+### GET /api/rates/refresh?bank=<bank_id>
+
+Force refresh rates for a specific bank or all banks.
+
+**Parameters:**
+- `bank`: Optional bank ID. If omitted, refreshes all banks.
+
+**Examples:**
+```bash
+# Refresh specific bank
+curl "https://your-project.cloudfunctions.net/refresh_rates?bank=arionbanki"
+
+# Refresh all banks
+curl "https://your-project.cloudfunctions.net/refresh_rates"
+```
+
+**Response:** Same structure as GET /api/rates, with `"cached": false`
 
 ## Configuration
 
