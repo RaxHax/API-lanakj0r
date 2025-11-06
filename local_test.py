@@ -1,297 +1,166 @@
-"""
-Local testing Flask app for Multi-Bank Interest Rate API
-Supports: Landsbankinn, Arion banki, Íslandsbanki
-Run this locally before deploying to Firebase
-"""
+"""Local development server that mirrors the production Firebase API."""
+
 import logging
 import sys
-from datetime import datetime, timezone
-from flask import Flask, jsonify, request, render_template_string
+from datetime import datetime, timedelta, timezone
+from typing import Dict, List, Optional
 
-# Add functions directory to path
-sys.path.insert(0, 'functions')
+# Ensure the Firebase function sources are importable when running locally
+sys.path.insert(0, "functions")
 
-from functions.banks import get_bank_scraper, AVAILABLE_BANKS
+from functions.banks import AVAILABLE_BANKS
+from functions.firestore_manager import FirestoreManager
+from functions.services import RateService, RateServiceError, UnknownBankError
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# Initialize Flask app
-app = Flask(__name__)
 
-# In-memory cache for local testing (per bank)
-_cache = {}
+class InMemoryCacheManager(FirestoreManager):
+    """A lightweight Firestore replacement for local development."""
 
-CACHE_DURATION_SECONDS = 24 * 60 * 60  # 24 hours
+    def __init__(self, ttl_hours: int = 24):
+        # Intentionally skip the Firestore initialisation in the base class.
+        self.db = None
+        self.CACHE_DURATION_HOURS = ttl_hours
+        self._documents: List[Dict] = []
 
+    # The base implementation already provides ``format_response`` which we reuse.
 
-def is_cache_valid(bank_id):
-    """Check if in-memory cache is still valid for a specific bank"""
-    if bank_id not in _cache:
-        return False
+    def get_cached_rates(self, bank_id: Optional[str] = None) -> Optional[Dict]:
+        if not bank_id:
+            return None
 
-    cache_entry = _cache[bank_id]
-    if not cache_entry.get('data') or not cache_entry.get('timestamp'):
-        return False
+        matching = [doc for doc in self._documents if doc.get("bank_id") == bank_id]
+        if not matching:
+            return None
 
-    cache_age = (datetime.now(timezone.utc) - cache_entry['timestamp']).total_seconds()
-    return cache_age < CACHE_DURATION_SECONDS
+        latest = max(matching, key=lambda doc: doc["last_updated"])
+        if datetime.now(timezone.utc) - latest["last_updated"] > timedelta(hours=self.CACHE_DURATION_HOURS):
+            return None
 
+        return latest
 
-def get_fresh_rates(bank_id):
-    """Scrape and parse fresh rates for a specific bank"""
-    try:
-        scraper = get_bank_scraper(bank_id)
-        if not scraper:
-            logger.error(f"Unknown bank: {bank_id}")
-            return None, None
+    def save_rates(self, rate_data: Dict, source_url: str, bank_id: str, bank_name: str) -> bool:
+        document = {
+            "bank_id": bank_id,
+            "bank_name": bank_name,
+            "effective_date": rate_data.get("effective_date"),
+            "last_updated": datetime.now(timezone.utc),
+            "data": rate_data,
+            "source_url": source_url,
+        }
+        self._documents.append(document)
+        return True
 
-        logger.info(f"Scraping rates for {scraper.bank_name}...")
-        rate_data, source_url = scraper.scrape_rates()
+    def clear_old_caches(self, keep_latest: int = 5) -> int:
+        deleted = 0
+        by_bank: Dict[str, List[Dict]] = {}
+        for doc in self._documents:
+            by_bank.setdefault(doc["bank_id"], []).append(doc)
 
-        if not rate_data:
-            logger.error(f"Failed to scrape rates for {bank_id}")
-            return None, None
+        new_store: List[Dict] = []
+        for bank_id, docs in by_bank.items():
+            docs.sort(key=lambda doc: doc["last_updated"], reverse=True)
+            new_store.extend(docs[:keep_latest])
+            deleted += max(len(docs) - keep_latest, 0)
 
-        return rate_data, source_url
-
-    except Exception as e:
-        logger.error(f"Error scraping {bank_id}: {e}", exc_info=True)
-        return None, None
-
-
-def format_single_bank_response(bank_id, rate_data, source_url, from_cache=False):
-    """Format API response for a single bank"""
-    return {
-        "bank_id": bank_id,
-        "bank_name": rate_data.get("bank_name", "Unknown"),
-        "effective_date": rate_data.get("effective_date"),
-        "last_updated": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
-        "data": rate_data,
-        "source_url": source_url,
-        "cached": from_cache
-    }
+        self._documents = new_store
+        return deleted
 
 
-def format_multi_bank_response(banks_data):
-    """Format API response for multiple banks"""
-    return {
-        "banks": banks_data,
-        "available_banks": list(AVAILABLE_BANKS.keys())
-    }
+def build_rate_service() -> RateService:
+    return RateService(firestore_mgr=InMemoryCacheManager())
 
 
-@app.route('/', methods=['GET'])
-def index():
-    """Serve the web UI"""
+def create_app():
+    from flask import Flask, jsonify, render_template_string, request
+
+    app = Flask(__name__)
+    rate_service = build_rate_service()
+
     from ui_template import HTML_TEMPLATE
-    return render_template_string(HTML_TEMPLATE)
 
+    @app.route("/")
+    def index():
+        return render_template_string(HTML_TEMPLATE)
 
-@app.route('/api/rates', methods=['GET'])
-def get_rates():
-    """
-    GET /api/rates?bank=<bank_id> - Return interest rates for specific bank
-    GET /api/rates - Return interest rates for all banks
-
-    Returns cached data if available and not expired,
-    otherwise scrapes and parses the latest data
-    """
-    try:
-        bank_id = request.args.get('bank')
-
-        # If bank_id specified, return single bank
-        if bank_id:
-            if bank_id not in AVAILABLE_BANKS:
-                return jsonify({
-                    "error": f"Unknown bank: {bank_id}",
-                    "available_banks": list(AVAILABLE_BANKS.keys())
-                }), 400
-
-            logger.info(f"GET /api/rates?bank={bank_id} - Request received")
-
-            # Check cache
-            if is_cache_valid(bank_id):
-                logger.info(f"Returning cached rates for {bank_id}")
-                cache_entry = _cache[bank_id]
-                response = format_single_bank_response(
-                    bank_id,
-                    cache_entry['data'],
-                    cache_entry['source_url'],
-                    from_cache=True
-                )
-                return jsonify(response)
-
-            # Cache miss - get fresh data
-            logger.info(f"Cache miss - fetching fresh rates for {bank_id}")
-            rate_data, source_url = get_fresh_rates(bank_id)
-
-            if not rate_data:
-                return jsonify({
-                    "error": f"Failed to fetch interest rates for {bank_id}"
-                }), 500
-
-            # Update cache
-            _cache[bank_id] = {
-                'data': rate_data,
-                'timestamp': datetime.now(timezone.utc),
-                'source_url': source_url
-            }
-
-            response = format_single_bank_response(
-                bank_id, rate_data, source_url, from_cache=False
-            )
-            return jsonify(response)
-
-        # No bank_id - return all banks
-        logger.info("GET /api/rates - Request received (all banks)")
-
-        banks_data = {}
-        for bank_id in AVAILABLE_BANKS.keys():
-            # Check cache
-            if is_cache_valid(bank_id):
-                logger.info(f"Using cached data for {bank_id}")
-                cache_entry = _cache[bank_id]
-                banks_data[bank_id] = format_single_bank_response(
-                    bank_id,
-                    cache_entry['data'],
-                    cache_entry['source_url'],
-                    from_cache=True
-                )
-            else:
-                # Fetch fresh data
-                logger.info(f"Fetching fresh data for {bank_id}")
-                rate_data, source_url = get_fresh_rates(bank_id)
-
-                if rate_data:
-                    _cache[bank_id] = {
-                        'data': rate_data,
-                        'timestamp': datetime.now(timezone.utc),
-                        'source_url': source_url
+    @app.route("/api/rates")
+    def get_rates():
+        bank_id = (request.args.get("bank") or "").strip().lower()
+        try:
+            if bank_id:
+                payload = rate_service.get_bank_rates(bank_id)
+                return jsonify(payload)
+            payload = rate_service.get_all_bank_rates()
+            return jsonify(payload)
+        except UnknownBankError as exc:
+            return (
+                jsonify(
+                    {
+                        "error": str(exc),
+                        "available_banks": list(AVAILABLE_BANKS.keys()),
                     }
-                    banks_data[bank_id] = format_single_bank_response(
-                        bank_id, rate_data, source_url, from_cache=False
-                    )
-                else:
-                    banks_data[bank_id] = {
-                        "bank_id": bank_id,
-                        "error": "Failed to fetch data"
-                    }
-
-        response = format_multi_bank_response(banks_data)
-        return jsonify(response)
-
-    except Exception as e:
-        logger.error(f"Error in get_rates: {e}", exc_info=True)
-        return jsonify({
-            "error": "Internal server error",
-            "details": str(e)
-        }), 500
-
-
-@app.route('/api/rates/refresh', methods=['GET'])
-def refresh_rates():
-    """
-    GET /api/rates/refresh?bank=<bank_id> - Force refresh for specific bank
-    GET /api/rates/refresh - Force refresh all banks
-
-    Scrapes and parses the latest data regardless of cache status
-    """
-    try:
-        bank_id = request.args.get('bank')
-
-        # If bank_id specified, refresh single bank
-        if bank_id:
-            if bank_id not in AVAILABLE_BANKS:
-                return jsonify({
-                    "error": f"Unknown bank: {bank_id}",
-                    "available_banks": list(AVAILABLE_BANKS.keys())
-                }), 400
-
-            logger.info(f"GET /api/rates/refresh?bank={bank_id} - Request received")
-
-            # Get fresh data
-            rate_data, source_url = get_fresh_rates(bank_id)
-
-            if not rate_data:
-                return jsonify({
-                    "error": f"Failed to fetch interest rates for {bank_id}"
-                }), 500
-
-            # Update cache
-            _cache[bank_id] = {
-                'data': rate_data,
-                'timestamp': datetime.now(timezone.utc),
-                'source_url': source_url
-            }
-
-            response = format_single_bank_response(
-                bank_id, rate_data, source_url, from_cache=False
+                ),
+                400,
             )
-            return jsonify(response)
+        except RateServiceError as exc:
+            return jsonify({"error": str(exc)}), 502
 
-        # No bank_id - refresh all banks
-        logger.info("GET /api/rates/refresh - Request received (all banks)")
+    @app.route("/api/rates/refresh")
+    def refresh_rates():
+        bank_id = (request.args.get("bank") or "").strip().lower()
+        try:
+            if bank_id:
+                payload = rate_service.get_bank_rates(bank_id, force_refresh=True)
+                return jsonify(payload)
+            payload = rate_service.get_all_bank_rates(force_refresh=True)
+            return jsonify(payload)
+        except UnknownBankError as exc:
+            return (
+                jsonify(
+                    {
+                        "error": str(exc),
+                        "available_banks": list(AVAILABLE_BANKS.keys()),
+                    }
+                ),
+                400,
+            )
+        except RateServiceError as exc:
+            return jsonify({"error": str(exc)}), 502
 
-        banks_data = {}
+    @app.route("/health")
+    def health():
+        snapshot = {}
         for bank_id in AVAILABLE_BANKS.keys():
-            logger.info(f"Refreshing {bank_id}...")
-            rate_data, source_url = get_fresh_rates(bank_id)
+            try:
+                snapshot[bank_id] = bool(rate_service.get_bank_rates(bank_id))
+            except Exception:  # pragma: no cover - surface status in response instead
+                snapshot[bank_id] = False
+        return jsonify(
+            {
+                "status": "healthy",
+                "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "available_banks": list(AVAILABLE_BANKS.keys()),
+                "cache_status": snapshot,
+            }
+        )
 
-            if rate_data:
-                _cache[bank_id] = {
-                    'data': rate_data,
-                    'timestamp': datetime.now(timezone.utc),
-                    'source_url': source_url
-                }
-                banks_data[bank_id] = format_single_bank_response(
-                    bank_id, rate_data, source_url, from_cache=False
-                )
-            else:
-                banks_data[bank_id] = {
-                    "bank_id": bank_id,
-                    "error": "Failed to fetch data"
-                }
-
-        response = format_multi_bank_response(banks_data)
-        return jsonify(response)
-
-    except Exception as e:
-        logger.error(f"Error in refresh_rates: {e}", exc_info=True)
-        return jsonify({
-            "error": "Internal server error",
-            "details": str(e)
-        }), 500
+    return app
 
 
-@app.route('/health', methods=['GET'])
-def health_check():
-    """Health check endpoint"""
-    cache_status = {}
-    for bank_id in AVAILABLE_BANKS.keys():
-        cache_status[bank_id] = is_cache_valid(bank_id)
+if __name__ == "__main__":
+    app = create_app()
 
-    return jsonify({
-        "status": "healthy",
-        "timestamp": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
-        "available_banks": list(AVAILABLE_BANKS.keys()),
-        "cache_status": cache_status
-    })
-
-
-if __name__ == '__main__':
-    print("=" * 60)
-    print("Multi-Bank Interest Rate API - Local Test Server")
-    print("=" * 60)
+    print("=" * 72)
+    print("Multi-Bank Interest Rate API - Local Development Server")
+    print("=" * 72)
     print("\n🏦 Supported Banks:")
-    for bank_id, scraper_factory in AVAILABLE_BANKS.items():
-        scraper_class = scraper_factory()  # Call lambda to get class
-        scraper = scraper_class()  # Instantiate the class
-        print(f"  • {scraper.bank_name} ({bank_id})")
+    for bank_id in AVAILABLE_BANKS.keys():
+        print(f"  • {bank_id}")
     print("\n📡 Available endpoints:")
     print("  GET http://localhost:5000/")
     print("  GET http://localhost:5000/api/rates")
@@ -299,8 +168,8 @@ if __name__ == '__main__':
     print("  GET http://localhost:5000/api/rates/refresh")
     print("  GET http://localhost:5000/api/rates/refresh?bank=<bank_id>")
     print("  GET http://localhost:5000/health")
-    print("\n" + "=" * 60)
+    print("\n" + "=" * 72)
     print("\n🌐 Opening web interface at http://localhost:5000")
-    print("\n" + "=" * 60 + "\n")
+    print("\n" + "=" * 72 + "\n")
 
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=True, host="0.0.0.0", port=5000)

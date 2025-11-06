@@ -29,8 +29,8 @@ That's it! The API will scrape and return the latest rates.
 # 1. Login to Firebase
 firebase login
 
-# 2. Create/select a Firebase project in the console
-# https://console.firebase.google.com/
+# 2. Select the project the CLI should use
+firebase use your-firebase-project-id
 
 # 3. Configure your project
 cp .firebaserc.template .firebaserc
@@ -41,6 +41,13 @@ firebase deploy --only functions
 
 # 5. Get your function URLs
 firebase functions:list
+```
+On Windows use the equivalent copy command when configuring your project:
+```cmd
+copy .firebaserc.template .firebaserc
+```
+```powershell
+Copy-Item .firebaserc.template .firebaserc
 ```
 
 Your API is now live at:
