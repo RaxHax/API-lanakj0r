@@ -5,7 +5,7 @@ Run this locally before deploying to Firebase
 """
 import logging
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from flask import Flask, jsonify, request, render_template_string
 
 # Add functions directory to path
@@ -38,7 +38,7 @@ def is_cache_valid(bank_id):
     if not cache_entry.get('data') or not cache_entry.get('timestamp'):
         return False
 
-    cache_age = (datetime.utcnow() - cache_entry['timestamp']).total_seconds()
+    cache_age = (datetime.now(timezone.utc) - cache_entry['timestamp']).total_seconds()
     return cache_age < CACHE_DURATION_SECONDS
 
 
@@ -70,7 +70,7 @@ def format_single_bank_response(bank_id, rate_data, source_url, from_cache=False
         "bank_id": bank_id,
         "bank_name": rate_data.get("bank_name", "Unknown"),
         "effective_date": rate_data.get("effective_date"),
-        "last_updated": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
+        "last_updated": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
         "data": rate_data,
         "source_url": source_url,
         "cached": from_cache
@@ -138,7 +138,7 @@ def get_rates():
             # Update cache
             _cache[bank_id] = {
                 'data': rate_data,
-                'timestamp': datetime.utcnow(),
+                'timestamp': datetime.now(timezone.utc),
                 'source_url': source_url
             }
 
@@ -170,7 +170,7 @@ def get_rates():
                 if rate_data:
                     _cache[bank_id] = {
                         'data': rate_data,
-                        'timestamp': datetime.utcnow(),
+                        'timestamp': datetime.now(timezone.utc),
                         'source_url': source_url
                     }
                     banks_data[bank_id] = format_single_bank_response(
@@ -225,7 +225,7 @@ def refresh_rates():
             # Update cache
             _cache[bank_id] = {
                 'data': rate_data,
-                'timestamp': datetime.utcnow(),
+                'timestamp': datetime.now(timezone.utc),
                 'source_url': source_url
             }
 
@@ -245,7 +245,7 @@ def refresh_rates():
             if rate_data:
                 _cache[bank_id] = {
                     'data': rate_data,
-                    'timestamp': datetime.utcnow(),
+                    'timestamp': datetime.now(timezone.utc),
                     'source_url': source_url
                 }
                 banks_data[bank_id] = format_single_bank_response(
@@ -277,7 +277,7 @@ def health_check():
 
     return jsonify({
         "status": "healthy",
-        "timestamp": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
+        "timestamp": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
         "available_banks": list(AVAILABLE_BANKS.keys()),
         "cache_status": cache_status
     })

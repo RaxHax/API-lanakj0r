@@ -3,7 +3,7 @@ Base interface for bank rate scrapers
 """
 from abc import ABC, abstractmethod
 from typing import Dict, Optional, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 
 logger = logging.getLogger(__name__)
@@ -50,7 +50,7 @@ class BankScraper(ABC):
         return {
             "bank_name": self.bank_name,
             "bank_id": self.bank_id,
-            "last_run": datetime.utcnow().isoformat()
+            "last_run": datetime.now(timezone.utc).isoformat()
         }
 
     def enhance_with_ai(self, raw_text: str, parsed_data: Dict, source_type: str = "pdf") -> Dict:
@@ -95,7 +95,12 @@ class BankScraper(ABC):
             enhanced_data = self._merge_data(parsed_data, ai_data)
 
             new_null_count = self._count_nulls(enhanced_data)
-            logger.info(f"{self.bank_name}: AI enhancement reduced nulls from {null_count} to {new_null_count}")
+            if new_null_count < null_count:
+                logger.info(f"{self.bank_name}: AI enhancement reduced nulls from {null_count} to {new_null_count}")
+            elif new_null_count > null_count:
+                logger.warning(f"{self.bank_name}: AI enhancement increased nulls from {null_count} to {new_null_count}")
+            else:
+                logger.info(f"{self.bank_name}: AI enhancement kept null count at {null_count}")
 
             return enhanced_data
 
@@ -107,16 +112,16 @@ class BankScraper(ABC):
             return parsed_data
 
     def _count_nulls(self, data) -> int:
-        """Count null and empty values recursively."""
+        """Count null values recursively (ignoring empty containers)."""
         if data is None:
             return 1
         elif isinstance(data, dict):
             if not data:
-                return 1
+                return 0  # Empty dict is not a null, just an empty structure
             return sum(self._count_nulls(v) for v in data.values())
         elif isinstance(data, list):
             if not data:
-                return 1
+                return 0  # Empty list is not a null
             return sum(self._count_nulls(item) for item in data)
         else:
             return 0
