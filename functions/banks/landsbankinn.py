@@ -146,7 +146,10 @@ class LandsbankinScraper(BankScraper):
         if not text:
             return None, None
 
-        # Parse rates
+        # Parse rates with regex
         rate_data = self.parse_rates(text)
+
+        # Enhance with AI if needed
+        rate_data = self.enhance_with_ai(text, rate_data, source_type="pdf")
 
         return rate_data, pdf_url

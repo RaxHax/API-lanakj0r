@@ -459,6 +459,10 @@ class IslandsbankiScraper(BankScraper):
                 "penalty_interest": loans["penalty_interest"],
             }
 
+            # Enhance with AI if needed (using HTML text)
+            html_text = soup.get_text(separator='\n', strip=True)
+            rate_data = self.enhance_with_ai(html_text, rate_data, source_type="html")
+
             logger.info("Successfully scraped Íslandsbanki rates")
             return rate_data, self.BASE_URL
 

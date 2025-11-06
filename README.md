@@ -6,6 +6,8 @@ A Python API that scrapes the latest interest rates from **three major Icelandic
 >
 > **⚡ Quick Start**: See [QUICKSTART.md](QUICKSTART.md) to get running in 5 minutes!
 >
+> **🤖 AI Integration**: See [OPENROUTER_SETUP.md](OPENROUTER_SETUP.md) to enable free AI-powered data extraction
+>
 > **📋 Example Response**: See [example_response.json](example_response.json) for the complete API response structure
 >
 > **🔧 Multi-Bank Guide**: See [MULTI_BANK_SUPPORT.md](MULTI_BANK_SUPPORT.md) for complete multi-bank documentation
@@ -13,6 +15,7 @@ A Python API that scrapes the latest interest rates from **three major Icelandic
 ## Features
 
 - 🏦 **Multi-bank support**: Landsbankinn, Arion banki, Íslandsbanki
+- 🤖 **AI-powered parsing**: Free OpenRouter integration for intelligent data extraction
 - 🔄 Multiple scraping strategies (PDF, API, HTML)
 - 📊 Comprehensive parsing of all interest rate categories
 - 💾 Firestore caching with per-bank storage (24-hour duration)
