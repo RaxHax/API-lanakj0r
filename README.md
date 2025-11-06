@@ -198,6 +198,42 @@ API-lanakj0r/
 
    The service layer is fully unit-tested; running the test suite before committing helps catch regressions early.
 
+## Deploying to Firebase
+
+Firebase's Python Cloud Functions always run on the **2nd generation** runtime. This runtime relies on Cloud Build and Artifact
+Registry, which Google only enables for projects on the Blaze (pay-as-you-go) plan. If you try to deploy from a Spark plan
+project, the Firebase CLI will stop with an error similar to:
+
+```
+Error: Your project <project-id> must be on the Blaze (pay-as-you-go) plan to complete this command. Required API
+artifactregistry.googleapis.com can't be enabled until the upgrade is complete.
+```
+
+To deploy successfully:
+
+1. Upgrade the Firebase project to the Blaze plan in the [Firebase Console](https://console.firebase.google.com/).
+2. Confirm your `firebase.json` is targeting the Python runtime (required for the Firebase CLI to build the code correctly):
+   ```json
+   {
+     "functions": [
+       {
+         "source": "functions",
+         "codebase": "default",
+         "runtime": "python311"
+       }
+     ]
+   }
+   ```
+3. After the upgrade completes, re-run the deployment enabling any prompted Google Cloud APIs:
+   ```bash
+   firebase deploy --only functions
+   ```
+4. (Optional) If you only need to refresh the Firestore cache and do not require a redeploy, you can call the HTTP functions
+   locally using `firebase emulators:start` to avoid deployment costs.
+
+> **Tip:** You can stay on the Spark plan for local development and testing by running the Flask server (`python local_test.py`) or
+> the Firebase Emulator Suite. Upgrading to Blaze is only necessary when deploying Python functions to production.
+
 ### Firebase Deployment
 
 For a detailed step-by-step walkthrough (including setting Firebase environment variables and provisioning service accounts), see [docs/FIREBASE_SETUP.md](docs/FIREBASE_SETUP.md). The summary below highlights the key commands once your project is configured.
