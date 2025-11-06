@@ -288,8 +288,9 @@ if __name__ == '__main__':
     print("Multi-Bank Interest Rate API - Local Test Server")
     print("=" * 60)
     print("\n🏦 Supported Banks:")
-    for bank_id, scraper_class in AVAILABLE_BANKS.items():
-        scraper = scraper_class()
+    for bank_id, scraper_factory in AVAILABLE_BANKS.items():
+        scraper_class = scraper_factory()  # Call lambda to get class
+        scraper = scraper_class()  # Instantiate the class
         print(f"  • {scraper.bank_name} ({bank_id})")
     print("\n📡 Available endpoints:")
     print("  GET http://localhost:5000/")
