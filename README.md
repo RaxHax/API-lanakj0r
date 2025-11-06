@@ -21,6 +21,7 @@ A Python API that scrapes the latest interest rates from **three major Icelandic
 - 💾 Firestore caching with per-bank storage (24-hour duration)
 - 🚀 Firebase Cloud Functions deployment
 - 🧪 Local testing with Flask
+- 🧱 Hardened service layer with dedicated unit tests
 - 📱 iOS-ready JSON API
 - 🔍 Query specific banks or get all at once
 
@@ -190,7 +191,16 @@ API-lanakj0r/
    curl http://localhost:5000/health
    ```
 
+7. **Run automated checks**
+   ```bash
+   pytest
+   ```
+
+   The service layer is fully unit-tested; running the test suite before committing helps catch regressions early.
+
 ### Firebase Deployment
+
+For a detailed step-by-step walkthrough (including setting Firebase environment variables and provisioning service accounts), see [docs/FIREBASE_SETUP.md](docs/FIREBASE_SETUP.md). The summary below highlights the key commands once your project is configured.
 
 1. **Login to Firebase**
    ```bash

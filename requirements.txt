@@ -11,3 +11,6 @@ pdfminer.six>=20221105
 
 # Optional: for better development experience
 python-dotenv>=1.0.0
+
+# Testing
+pytest>=8.0.0
