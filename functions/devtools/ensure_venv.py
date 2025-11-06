@@ -55,9 +55,27 @@ def _ensure_virtualenv(python_executable: str) -> None:
     subprocess.check_call([python_executable, "-m", "venv", str(VENV_DIR)])
 
 
+def _venv_python_path() -> Path:
+    script_dir = "Scripts" if os.name == "nt" else "bin"
+    python_name = "python.exe" if os.name == "nt" else "python3"
+    python_path = VENV_DIR / script_dir / python_name
+    if not python_path.exists():  # Fallback to "python" which is common on UNIX
+        python_path = VENV_DIR / script_dir / ("python" if os.name != "nt" else "python.exe")
+    return python_path
+
+
 def _install_requirements(pip_executable: Path) -> None:
     _log("Installing Firebase function requirements")
-    subprocess.check_call([str(pip_executable), "install", "--upgrade", "pip"])
+    python_executable = _venv_python_path()
+    if not python_executable.exists():
+        raise EnsureVenvError(
+            "Virtualenv created but python executable missing at "
+            f"{python_executable}."
+        )
+
+    subprocess.check_call(
+        [str(python_executable), "-m", "pip", "install", "--upgrade", "pip"]
+    )
     subprocess.check_call([str(pip_executable), "install", "-r", str(REQUIREMENTS_PATH)])
 
 
