@@ -17,6 +17,15 @@
         "env",
         "venv",
         ".venv"
+      ],
+      "predeploy": [
+        {
+          "command": "python",
+          "args": [
+            "-m",
+            "functions.devtools.ensure_venv"
+          ]
+        }
       ]
     }
   ]

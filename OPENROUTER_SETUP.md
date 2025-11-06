@@ -74,10 +74,18 @@ Visit `http://localhost:8000` and test the bank scrapers.
 
 ### 5. Deploy to Firebase (Optional)
 
-If you're using Firebase Functions, set the environment variable:
+If you're using Firebase Functions, you can set a runtime configuration value:
 
 ```bash
-firebase functions:config:set openrouter.api_key="sk-or-v1-your-actual-key-here"
+firebase functions:config:set openrouter.key="sk-or-v1-your-actual-key-here"
+firebase deploy --only functions
+```
+
+For long-term support (after the legacy config service is retired), migrate the key to
+Firebase Secrets Manager:
+
+```bash
+firebase functions:secrets:set OPENROUTER_API_KEY
 firebase deploy --only functions
 ```
 
@@ -178,7 +186,7 @@ pip install openai python-dotenv
 Set config explicitly:
 
 ```bash
-firebase functions:config:set openrouter.api_key="your-key"
+firebase functions:config:set openrouter.key="your-key"
 firebase functions:config:get  # Verify it's set
 ```
 
