@@ -201,16 +201,16 @@ IMPORTANT:
         }
 
     def _count_nulls(self, data: Any) -> int:
-        """Recursively count null and empty values in data structure."""
+        """Recursively count null values in data structure (ignoring empty containers)."""
         if data is None:
             return 1
         elif isinstance(data, dict):
             if not data:  # Empty dict
-                return 1
+                return 0  # Empty dict is not a null, just an empty structure
             return sum(self._count_nulls(v) for v in data.values())
         elif isinstance(data, list):
             if not data:  # Empty list
-                return 1
+                return 0  # Empty list is not a null
             return sum(self._count_nulls(item) for item in data)
         else:
             return 0
