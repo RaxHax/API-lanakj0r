@@ -103,11 +103,12 @@ The API parses the following sections from the Landsbankinn PDF:
 ```
 API-lanakj0r/
 ├── functions/
-│   ├── main.py              # Firebase Cloud Function handlers
-│   ├── scraper.py           # PDF scraping from website
-│   ├── parser.py            # PDF parsing logic
-│   ├── firestore_manager.py # Firestore caching
-│   └── requirements.txt     # Python dependencies
+│   ├── main.py                # Firebase Cloud Function handlers
+│   ├── ai_processor.py        # OpenRouter powered parsing helper
+│   ├── banks/                 # Individual bank scrapers
+│   ├── services/              # Application services (caching, orchestration)
+│   ├── devtools/ensure_venv.py# Firebase deployment utilities
+│   └── requirements.txt       # Cloud Function dependencies
 ├── local_test.py            # Local Flask testing server
 ├── requirements.txt         # Local dependencies
 ├── firebase.json            # Firebase configuration
@@ -187,6 +188,17 @@ API-lanakj0r/
    > **Note:** The AI uses a free model by default (`openai/gpt-oss-20b:free`), so there's no cost!
    > Without the API key, the scraper will still work but may have incomplete data extraction.
 
+   If you're deploying to Firebase Functions you can alternatively store the key with:
+
+   ```bash
+   firebase functions:config:set openrouter.key="sk-or-v1-your-actual-key-here"
+   # or, preferred for long term support:
+   firebase functions:secrets:set OPENROUTER_API_KEY
+   ```
+
+   The runtime will now discover the key from either environment variables, legacy
+   `functions:config` values, or Firebase Secrets Manager.
+
 5. **Run local test server**
    ```bash
    python local_test.py
@@ -217,6 +229,8 @@ API-lanakj0r/
 
 For a detailed step-by-step walkthrough (including setting Firebase environment variables and provisioning service accounts), see [docs/FIREBASE_SETUP.md](docs/FIREBASE_SETUP.md). The summary below highlights the key commands once your project is configured.
 
+> **Heads up:** Legacy single-bank entry points have been removed. Deployments now rely solely on `functions/main.py`, which exposes the production-ready HTTP functions.
+
 1. **Login to Firebase**
    ```bash
    firebase login
@@ -241,6 +255,12 @@ For a detailed step-by-step walkthrough (including setting Firebase environment 
    ```bash
    firebase deploy --only functions
    ```
+
+   The deployment process now bootstraps a dedicated virtual environment inside
+   `functions/venv` automatically (via `functions/devtools/ensure_venv.py`). On
+   first run this may take a couple of minutes while dependencies are installed.
+   Subsequent deployments reuse the cached environment and only reinstall when
+   `functions/requirements.txt` changes.
 
 5. **Get your Cloud Function URLs**
    ```bash
@@ -445,11 +465,12 @@ firestore_mgr.clear_old_caches(keep_latest=5)  # Change this value
 
 ### PDF Scraping Issues
 
-If the scraper can't find the PDF:
+If a bank scraper stops finding the latest PDF or HTML source:
 
-1. Check if the website URL has changed
-2. Update `BASE_URL` in `functions/scraper.py`
-3. Verify the PDF link pattern in `get_latest_pdf_url()`
+1. Confirm the public website URL is still valid.
+2. Update the matching scraper in `functions/banks/` (for example
+   `functions/banks/landsbankinn.py`).
+3. Adjust any bank-specific selectors or URL builders inside the scraper class.
 
 ### Parsing Issues
 

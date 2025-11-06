@@ -85,6 +85,11 @@ This guide walks through configuring Firebase so the Cloud Functions in this rep
    firebase deploy --only functions
    ```
 
+   > The deploy command automatically prepares `functions/venv` using
+   > `python -m functions.devtools.ensure_venv`, so you do not need to create a
+   > nested virtual environment manually. Dependencies are only reinstalled when
+   > `functions/requirements.txt` changes.
+
 3. **Verify deployment**
    ```bash
    firebase functions:list
