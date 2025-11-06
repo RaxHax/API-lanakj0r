@@ -87,9 +87,19 @@ class BankScraper(ABC):
                 logger.info(f"{self.bank_name}: Regex parsing successful ({null_count} nulls, threshold: {ai_threshold}), skipping AI")
                 return parsed_data
 
-            logger.info(f"{self.bank_name}: Using AI to enhance data ({null_count} null values, threshold: {ai_threshold})")
+            logger.info(
+                "%s: Using AI to enhance data (%s null values, threshold: %s)",
+                self.bank_name,
+                null_count,
+                ai_threshold,
+            )
             processor = AIProcessor()
-            ai_data = processor.parse_bank_data(raw_text, self.bank_name, source_type)
+            ai_data = processor.parse_bank_data(
+                raw_text,
+                self.bank_name,
+                source_type,
+                bank_id=self.bank_id,
+            )
 
             # Merge AI results with regex results (prefer non-null values)
             enhanced_data = self._merge_data(parsed_data, ai_data)

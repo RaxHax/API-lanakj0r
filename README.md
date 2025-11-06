@@ -187,6 +187,17 @@ API-lanakj0r/
    > **Note:** The AI uses a free model by default (`openai/gpt-oss-20b:free`), so there's no cost!
    > Without the API key, the scraper will still work but may have incomplete data extraction.
 
+   If you're deploying to Firebase Functions you can alternatively store the key with:
+
+   ```bash
+   firebase functions:config:set openrouter.key="sk-or-v1-your-actual-key-here"
+   # or, preferred for long term support:
+   firebase functions:secrets:set OPENROUTER_API_KEY
+   ```
+
+   The runtime will now discover the key from either environment variables, legacy
+   `functions:config` values, or Firebase Secrets Manager.
+
 5. **Run local test server**
    ```bash
    python local_test.py
@@ -216,6 +227,8 @@ API-lanakj0r/
 ### Firebase Deployment
 
 For a detailed step-by-step walkthrough (including setting Firebase environment variables and provisioning service accounts), see [docs/FIREBASE_SETUP.md](docs/FIREBASE_SETUP.md). The summary below highlights the key commands once your project is configured.
+
+> **Heads up:** Legacy single-bank entry points have been removed. Deployments now rely solely on `functions/main.py`, which exposes the production-ready HTTP functions.
 
 1. **Login to Firebase**
    ```bash
