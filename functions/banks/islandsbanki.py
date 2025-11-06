@@ -95,6 +95,17 @@ class IslandsbankiScraper(BankScraper):
         """Return the most relevant heading text for a table."""
 
         heading_text = ""
+
+        # For ARIA-based tables, check for sibling button with class irt-table__title
+        parent = table.find_parent("div", class_="irt-table")
+        if parent:
+            button = parent.find("button", class_="irt-table__title")
+            if button:
+                text = button.get_text(separator=" ", strip=True)
+                if text and 2 <= len(text) <= 150:
+                    return text
+
+        # Fall back to traditional heading search
         heading_priority = [
             ["h2", "h3", "h4", "h5"],
             ["strong", "p", "span", "button"],
@@ -121,7 +132,16 @@ class IslandsbankiScraper(BankScraper):
 
         grouped: Dict[str, List] = {key: [] for key in keyword_map.keys()}
 
-        for table in soup.find_all("table"):
+        # Look for both traditional HTML tables and ARIA-based div tables
+        tables = soup.find_all("table")
+
+        # Also look for div elements with role="table" or class="irt-table__content"
+        div_tables = soup.find_all("div", class_="irt-table__content")
+        div_tables.extend(soup.find_all("div", attrs={"role": "table"}))
+
+        all_tables = list(tables) + list(div_tables)
+
+        for table in all_tables:
             heading_text = self.get_table_heading(table)
             if not heading_text:
                 continue
@@ -212,22 +232,47 @@ class IslandsbankiScraper(BankScraper):
             return None
 
     def parse_table_rows(self, table) -> Dict[str, float | List[float]]:
-        """Parse rows from an interest rate table."""
+        """Parse rows from an interest rate table (traditional or ARIA-based)."""
 
         result: Dict[str, float | List[float]] = {}
 
-        for row in table.find_all("tr"):
+        # Try traditional HTML table rows first
+        rows = table.find_all("tr")
+
+        # If no traditional rows found, look for ARIA-based div rows
+        if not rows:
+            rows = table.find_all("div", attrs={"role": "row"})
+
+        for row in rows:
+            # Skip header rows
+            if "irt-table__head" in row.get("class", []):
+                continue
+
+            # Try traditional table cells
             cells = row.find_all(["td", "th"])
+
+            # If no traditional cells, look for ARIA-based cells
+            if not cells:
+                cells = row.find_all("div", attrs={"role": ["cell", "columnheader"]})
+
             if len(cells) < 2:
                 continue
 
-            account_name = cells[0].get_text().strip()
+            account_name = cells[0].get_text(separator=" ", strip=True)
             if not account_name:
+                continue
+
+            # Skip if this looks like a group header (e.g., "Vaxtaþrep", "Debetreikningur")
+            if len(cells) == 1 or (
+                len(cells) >= 2
+                and not cells[1].get_text(strip=True)
+                and not any(cell.get_text(strip=True) for cell in cells[1:])
+            ):
                 continue
 
             rates: List[float] = []
             for cell in cells[1:]:
-                rate_text = cell.get_text().strip()
+                rate_text = cell.get_text(strip=True)
                 rate = self.parse_percentage(rate_text)
                 if rate is not None:
                     rates.append(rate)
@@ -267,8 +312,9 @@ class IslandsbankiScraper(BankScraper):
 
         keyword_map = {
             "veltureikningar": [[r"veltureik"]],
-            "spar_indexed": [[r"sparireik", r"verðtrygg"]],
+            # Check unindexed before indexed to avoid matching "óverðtrygg" as "verðtrygg"
             "spar_unindexed": [[r"sparireik", r"óverðtrygg"]],
+            "spar_indexed": [[r"sparireik", r"verðtrygg"]],
             "spar_general": [[r"sparireik"]],
             "foreign_currency": [[r"gjaldmiðl"], [r"gjaldeyr"]],
         }
@@ -341,11 +387,12 @@ class IslandsbankiScraper(BankScraper):
         }
 
         keyword_map = {
-            "mortgages_indexed": [[r"íbúðalán", r"verðtrygg"], [r"verðtrygg", r"fasteignalán"]],
+            # Check unindexed before indexed to avoid matching "óverðtrygg" as "verðtrygg"
             "mortgages_unindexed": [
                 [r"íbúðalán", r"óverðtrygg"],
                 [r"óverðtrygg", r"fasteignalán"],
             ],
+            "mortgages_indexed": [[r"íbúðalán", r"verðtrygg"], [r"verðtrygg", r"fasteignalán"]],
             "mortgages_generic": [[r"íbúðalán"]],
             "overdrafts": [[r"yfirdrátt"]],
             "credit_cards": [[r"kort"], [r"kredit"]],
