@@ -19,6 +19,7 @@ class AIProcessor:
     def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None) -> None:
         self.api_key = api_key or Config.get_openrouter_api_key()
         self.model = model or Config.OPENROUTER_MODEL
+        self.max_retries = max(1, max_retries)
 
         if not self.api_key:
             raise ValueError("OpenRouter API key not configured")

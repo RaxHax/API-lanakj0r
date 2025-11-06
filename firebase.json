@@ -17,6 +17,9 @@
         "env",
         "venv",
         ".venv"
+      ],
+      "predeploy": [
+        "python -m functions.devtools.ensure_venv"
       ]
     }
   ]
