@@ -16,12 +16,7 @@ logger = logging.getLogger(__name__)
 class AIProcessor:
     """Process bank data using OpenRouter-hosted models."""
 
-    def __init__(
-        self,
-        api_key: Optional[str] = None,
-        model: Optional[str] = None,
-        max_retries: int = 2,
-    ) -> None:
+    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None) -> None:
         self.api_key = api_key or Config.get_openrouter_api_key()
         self.model = model or Config.OPENROUTER_MODEL
         self.max_retries = max(1, max_retries)
@@ -50,71 +45,7 @@ class AIProcessor:
         )
 
         prompt = self._create_parsing_prompt(raw_text, bank_name, source_type, bank_id)
-        feedback = ""
 
-        for attempt in range(1, self.max_retries + 1):
-            attempt_prompt = prompt
-            if feedback:
-                attempt_prompt = (
-                    f"{prompt}\n\nThe previous attempt failed because {feedback}. "
-                    "Return ONLY valid JSON."
-                )
-
-            response = self._invoke_model(system_message, attempt_prompt, bank_name)
-            message = response.choices[0].message if response.choices else None
-            result_text = (message.content or "").strip() if message else ""
-
-            if not result_text:
-                logger.warning(
-                    "AI response for %s was empty on attempt %s", bank_name, attempt
-                )
-                feedback = "the response was empty"
-                continue
-
-            result_text = self._extract_json_block(result_text)
-
-            try:
-                parsed_data = json.loads(result_text)
-            except json.JSONDecodeError as exc:
-                logger.warning(
-                    "Failed to parse AI response for %s on attempt %s: %s",
-                    bank_name,
-                    attempt,
-                    exc,
-                )
-                logger.debug("Raw AI response: %s", result_text[:500])
-                feedback = f"the JSON was invalid ({exc})"
-                continue
-
-            if not isinstance(parsed_data, dict):
-                logger.warning(
-                    "AI response for %s was not a JSON object on attempt %s",
-                    bank_name,
-                    attempt,
-                )
-                feedback = "the response was not a JSON object"
-                continue
-
-            parsed_data.setdefault("bank_name", bank_name)
-            if bank_id:
-                parsed_data.setdefault("bank_id", bank_id)
-
-            logger.info("Successfully parsed %s data using AI", bank_name)
-            return parsed_data
-
-        logger.error("AI failed to return usable JSON for %s after %s attempts", bank_name, self.max_retries)
-        return self._get_empty_structure(bank_name=bank_name, bank_id=bank_id)
-
-    def enhance_parsed_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Enhance already-parsed data by filling in gaps and normalising values."""
-
-        if self._count_nulls(data) == 0:
-            return data
-
-        logger.info("Enhancement hook currently passes data through unchanged")
-        return data
-
-    def _invoke_model(self, system_message: str, prompt: str, bank_name: str):
         request_payload = dict(
             model=self.model,
             messages=[
@@ -126,13 +57,49 @@ class AIProcessor:
         )
 
         try:
-            return self.client.chat.completions.create(
+            response = self.client.chat.completions.create(
                 **request_payload,
                 response_format={"type": "json_object"},
             )
         except Exception as exc:  # pragma: no cover - network failure fallback
-            logger.warning("Retrying without JSON enforcement for %s: %s", bank_name, exc)
-            return self.client.chat.completions.create(**request_payload)
+            logger.warning("Falling back to free-form response for %s: %s", bank_name, exc)
+            response = self.client.chat.completions.create(**request_payload)
+
+        message = response.choices[0].message if response.choices else None
+        result_text = (message.content or "").strip() if message else ""
+
+        if not result_text:
+            logger.error("AI response for %s was empty", bank_name)
+            return self._get_empty_structure(bank_name=bank_name, bank_id=bank_id)
+
+        result_text = self._extract_json_block(result_text)
+
+        try:
+            parsed_data = json.loads(result_text)
+        except json.JSONDecodeError as exc:
+            logger.error("Failed to parse AI response for %s: %s", bank_name, exc)
+            logger.debug("Raw AI response: %s", result_text[:500])
+            return self._get_empty_structure(bank_name=bank_name, bank_id=bank_id)
+
+        if not isinstance(parsed_data, dict):
+            logger.error("AI response for %s was not a JSON object", bank_name)
+            return self._get_empty_structure(bank_name=bank_name, bank_id=bank_id)
+
+        parsed_data.setdefault("bank_name", bank_name)
+        if bank_id:
+            parsed_data.setdefault("bank_id", bank_id)
+
+        logger.info("Successfully parsed %s data using AI", bank_name)
+        return parsed_data
+
+    def enhance_parsed_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Enhance already-parsed data by filling in gaps and normalising values."""
+
+        if self._count_nulls(data) == 0:
+            return data
+
+        logger.info("Enhancement hook currently passes data through unchanged")
+        return data
 
     @staticmethod
     def _extract_json_block(response_text: str) -> str:
@@ -206,3 +173,34 @@ class AIProcessor:
                 return 0
             return sum(self._count_nulls(item) for item in data)
         return 0
+
+
+def test_ai_processor() -> None:
+    """Manual smoke test for the AI processor."""
+    if not Config.get_openrouter_api_key():
+        print("❌ OPENROUTER_API_KEY not set in environment")
+        return
+
+    processor = AIProcessor()
+
+    sample_text = """
+    Vaxtatafla fyrir einstaklinga
+    Gildistími: 24. október 2025
+
+    Veltureikningar
+    Almennir veltureikningar: 0,10%
+
+    Íbúðalán - Verðtryggt
+    Íbúðalán I (breytilegir vextir): 8,60%
+    Íbúðalán II (breytilegir vextir): 9,10%
+
+    Dráttarvextir: 15,25%
+    """
+
+    print("Testing AI processor...")
+    result = processor.parse_bank_data(sample_text, "Test Bank", "pdf", bank_id="testbank")
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    test_ai_processor()
