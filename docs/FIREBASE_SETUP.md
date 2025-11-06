@@ -22,10 +22,23 @@ This guide walks through configuring Firebase so the Cloud Functions in this rep
    pip install -r requirements.txt
    pip install -r functions/requirements.txt
    ```
+   On Windows activate the virtual environment with one of the following commands before installing requirements:
+   ```cmd
+   venv\Scripts\activate
+   ```
+   ```powershell
+   .\venv\Scripts\Activate.ps1
+   ```
 
 2. **Copy the Firebase project file**
    ```bash
    cp .firebaserc.template .firebaserc
+   ```
+   ```cmd
+   copy .firebaserc.template .firebaserc
+   ```
+   ```powershell
+   Copy-Item .firebaserc.template .firebaserc
    ```
 
 3. **Edit `.firebaserc`**

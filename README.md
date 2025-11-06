@@ -145,7 +145,14 @@ API-lanakj0r/
 2. **Create virtual environment**
    ```bash
    python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   source venv/bin/activate
+   ```
+   On Windows run the appropriate activation command after creating the environment:
+   ```cmd
+   venv\Scripts\activate
+   ```
+   ```powershell
+   .\venv\Scripts\Activate.ps1
    ```
 
 3. **Install dependencies**
@@ -160,6 +167,14 @@ API-lanakj0r/
    ```bash
    # Copy the example environment file
    cp .env.example .env
+   ```
+   ```cmd
+   REM Windows Command Prompt equivalent
+   copy .env.example .env
+   ```
+   ```powershell
+   # Windows PowerShell equivalent
+   Copy-Item .env.example .env
    ```
 
    Then edit `.env` and add your OpenRouter API key:
@@ -197,42 +212,6 @@ API-lanakj0r/
    ```
 
    The service layer is fully unit-tested; running the test suite before committing helps catch regressions early.
-
-## Deploying to Firebase
-
-Firebase's Python Cloud Functions always run on the **2nd generation** runtime. This runtime relies on Cloud Build and Artifact
-Registry, which Google only enables for projects on the Blaze (pay-as-you-go) plan. If you try to deploy from a Spark plan
-project, the Firebase CLI will stop with an error similar to:
-
-```
-Error: Your project <project-id> must be on the Blaze (pay-as-you-go) plan to complete this command. Required API
-artifactregistry.googleapis.com can't be enabled until the upgrade is complete.
-```
-
-To deploy successfully:
-
-1. Upgrade the Firebase project to the Blaze plan in the [Firebase Console](https://console.firebase.google.com/).
-2. Confirm your `firebase.json` is targeting the Python runtime (required for the Firebase CLI to build the code correctly):
-   ```json
-   {
-     "functions": [
-       {
-         "source": "functions",
-         "codebase": "default",
-         "runtime": "python311"
-       }
-     ]
-   }
-   ```
-3. After the upgrade completes, re-run the deployment enabling any prompted Google Cloud APIs:
-   ```bash
-   firebase deploy --only functions
-   ```
-4. (Optional) If you only need to refresh the Firestore cache and do not require a redeploy, you can call the HTTP functions
-   locally using `firebase emulators:start` to avoid deployment costs.
-
-> **Tip:** You can stay on the Spark plan for local development and testing by running the Flask server (`python local_test.py`) or
-> the Firebase Emulator Suite. Upgrading to Blaze is only necessary when deploying Python functions to production.
 
 ### Firebase Deployment
 
