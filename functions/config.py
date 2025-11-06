@@ -20,6 +20,7 @@ class Config:
     # Application Settings
     DEBUG: bool = os.getenv('DEBUG', 'False').lower() == 'true'
     ENABLE_AI_PARSING: bool = os.getenv('ENABLE_AI_PARSING', 'True').lower() == 'true'
+    AI_NULL_THRESHOLD: int = int(os.getenv('AI_NULL_THRESHOLD', '3'))
 
     # Firebase Configuration
     FIREBASE_PROJECT_ID: Optional[str] = os.getenv('FIREBASE_PROJECT_ID')

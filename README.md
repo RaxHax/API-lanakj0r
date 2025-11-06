@@ -152,14 +152,33 @@ API-lanakj0r/
    pip install -r requirements.txt
    ```
 
-4. **Run local test server**
+4. **Configure OpenRouter AI (Recommended)**
+
+   The API uses AI to intelligently extract and enhance bank data. To enable this feature:
+
+   ```bash
+   # Copy the example environment file
+   cp .env.example .env
+   ```
+
+   Then edit `.env` and add your OpenRouter API key:
+   ```bash
+   OPENROUTER_API_KEY=sk-or-v1-your-actual-key-here
+   ```
+
+   Get a **free** API key at: https://openrouter.ai/keys
+
+   > **Note:** The AI uses a free model by default (`openai/gpt-oss-20b:free`), so there's no cost!
+   > Without the API key, the scraper will still work but may have incomplete data extraction.
+
+5. **Run local test server**
    ```bash
    python local_test.py
    ```
 
    The server will start at `http://localhost:5000`
 
-5. **Test the API**
+6. **Test the API**
    ```bash
    # Get rates (cached if available)
    curl http://localhost:5000/api/rates

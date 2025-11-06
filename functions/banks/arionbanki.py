@@ -223,6 +223,7 @@ class ArionBankiScraper(BankScraper):
     def parse_rates_from_pdf(self, text: str) -> Dict:
         """Parse rates from PDF text"""
         rates = {
+            "bank_name": self.bank_name,
             "deposits": {
                 "veltureikningar": {},
                 "sparireikningar": {},
