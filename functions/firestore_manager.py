@@ -1,16 +1,19 @@
-"""
-Firestore manager for caching interest rate data
-"""
-from datetime import datetime, timedelta
+"""Utility helpers for storing and retrieving cache documents in Firestore."""
+
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional
 import logging
 
+from config import Config
+
 try:
     from google.cloud import firestore
-    from google.cloud.firestore_v1.base_query import FieldFilter
-except ImportError:
-    # For local testing without Firebase
+except ImportError:  # pragma: no cover - optional dependency during tests
+    # For local testing without Firebase. The service will gracefully
+    # continue operating without persistence when the Firestore SDK is
+    # unavailable (for example during unit tests or local development).
     firestore = None
+
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +22,7 @@ class FirestoreManager:
     """Manager for Firestore operations"""
 
     COLLECTION_NAME = "interest_rates"
-    CACHE_DURATION_HOURS = 24
+    CACHE_DURATION_HOURS = Config.CACHE_DURATION_HOURS
 
     def __init__(self):
         """Initialize Firestore client"""
@@ -84,7 +87,12 @@ class FirestoreManager:
                 last_updated = datetime.fromisoformat(last_updated.replace('Z', '+00:00'))
 
             # Check if cache is expired
-            cache_age = datetime.utcnow() - last_updated.replace(tzinfo=None)
+            if isinstance(last_updated, datetime):
+                if last_updated.tzinfo is None:
+                    last_updated = last_updated.replace(tzinfo=timezone.utc)
+                else:
+                    last_updated = last_updated.astimezone(timezone.utc)
+            cache_age = datetime.now(timezone.utc) - last_updated
             if cache_age > timedelta(hours=self.CACHE_DURATION_HOURS):
                 logger.info(f"Cache expired (age: {cache_age})")
                 return None
@@ -192,16 +200,8 @@ class FirestoreManager:
         return result
 
     def format_response(self, data: Dict, from_cache: bool = True) -> Dict:
-        """
-        Format data for API response
+        """Return a consistently shaped payload for API responses."""
 
-        Args:
-            data: Raw data from Firestore or parser
-            from_cache: Whether data came from cache
-
-        Returns:
-            Dict: Formatted response
-        """
         # Handle different data structures
         if "data" in data:
             # From Firestore
@@ -209,28 +209,40 @@ class FirestoreManager:
             effective_date = data.get("effective_date")
             source_url = data.get("source_url")
             last_updated = data.get("last_updated")
+            bank_id = data.get("bank_id")
+            bank_name = data.get("bank_name")
         else:
             # From parser
             rate_data = data
             effective_date = data.get("effective_date")
             source_url = data.get("source_url")
-            last_updated = datetime.utcnow()
+            last_updated = datetime.now(timezone.utc)
+            bank_id = data.get("bank_id")
+            bank_name = data.get("bank_name")
 
         # Convert timestamp to ISO format
-        if hasattr(last_updated, 'timestamp'):
-            last_updated = datetime.fromtimestamp(last_updated.timestamp())
+        if hasattr(last_updated, "timestamp"):
+            last_updated = datetime.fromtimestamp(last_updated.timestamp(), tz=timezone.utc)
 
         if isinstance(last_updated, datetime):
-            last_updated_str = last_updated.strftime('%Y-%m-%dT%H:%M:%SZ')
+            last_updated_str = last_updated.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         elif isinstance(last_updated, str):
             last_updated_str = last_updated
         else:
-            last_updated_str = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+            last_updated_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        # Fall back to sensible defaults for metadata
+        if not bank_id and rate_data:
+            bank_id = rate_data.get("bank_id")
+        if not bank_name and rate_data:
+            bank_name = rate_data.get("bank_name")
 
         return {
+            "bank_id": bank_id,
+            "bank_name": bank_name,
             "effective_date": effective_date,
             "last_updated": last_updated_str,
             "data": rate_data,
             "source_url": source_url,
-            "cached": from_cache
+            "cached": from_cache,
         }
