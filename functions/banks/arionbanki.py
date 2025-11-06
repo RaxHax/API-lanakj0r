@@ -345,4 +345,7 @@ class ArionBankiScraper(BankScraper):
         rate_data = self.parse_rates_from_pdf(text)
         rate_data["effective_date"] = self.parse_effective_date(text)
 
+        # Enhance with AI if needed
+        rate_data = self.enhance_with_ai(text, rate_data, source_type="pdf")
+
         return rate_data, pdf_url
