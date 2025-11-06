@@ -115,6 +115,7 @@ class LandsbankinScraper(BankScraper):
         parser.raw_text = text
 
         return {
+            "bank_name": self.bank_name,
             "effective_date": self.parse_effective_date(text),
             "deposits": parser.parse_deposit_accounts(text),
             "mortgages": parser.parse_mortgage_loans(text),

@@ -79,12 +79,15 @@ class BankScraper(ABC):
             # Count how many null values we have
             null_count = self._count_nulls(parsed_data)
 
+            # Get AI threshold from config (default: 3)
+            ai_threshold = getattr(Config, 'AI_NULL_THRESHOLD', 3)
+
             # Only use AI if we have significant missing data
-            if null_count < 5:
-                logger.info(f"{self.bank_name}: Regex parsing successful ({null_count} nulls), skipping AI")
+            if null_count < ai_threshold:
+                logger.info(f"{self.bank_name}: Regex parsing successful ({null_count} nulls, threshold: {ai_threshold}), skipping AI")
                 return parsed_data
 
-            logger.info(f"{self.bank_name}: Using AI to enhance data ({null_count} null values)")
+            logger.info(f"{self.bank_name}: Using AI to enhance data ({null_count} null values, threshold: {ai_threshold})")
             processor = AIProcessor()
             ai_data = processor.parse_bank_data(raw_text, self.bank_name, source_type)
 
@@ -122,6 +125,7 @@ class BankScraper(ABC):
         """
         Merge AI-parsed data with original data.
         Prefer non-null values from either source.
+        Special handling for bank_name and other metadata fields.
         """
         if not isinstance(original, dict) or not isinstance(ai_data, dict):
             return original if original is not None else ai_data
@@ -129,11 +133,17 @@ class BankScraper(ABC):
         merged = {}
         all_keys = set(original.keys()) | set(ai_data.keys())
 
+        # Fields that should always be preserved from original if present
+        preserve_fields = {'bank_name', 'effective_date', 'bank_id'}
+
         for key in all_keys:
             orig_val = original.get(key)
             ai_val = ai_data.get(key)
 
-            if isinstance(orig_val, dict) and isinstance(ai_val, dict):
+            # Always preserve certain metadata fields from original
+            if key in preserve_fields and orig_val is not None:
+                merged[key] = orig_val
+            elif isinstance(orig_val, dict) and isinstance(ai_val, dict):
                 merged[key] = self._merge_data(orig_val, ai_val)
             elif orig_val is None or (isinstance(orig_val, dict) and not orig_val):
                 merged[key] = ai_val
